@@ -1,0 +1,22 @@
+rules_version = '2';
+// Game saves are keyed by a long random profile code (the code is the secret).
+// Nobody can list, search or delete saves; writes must move the revision forward.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /saves/{id} {
+      function validSave() {
+        let d = request.resource.data;
+        return id.size() >= 13 && id.size() <= 40
+          && d.keys().hasOnly(['data', 'rev', 'name', 'av'])
+          && d.data is string && d.data.size() < 200000
+          && d.rev is int
+          && d.name is string && d.name.size() <= 30
+          && d.av is string && d.av.size() <= 16;
+      }
+      allow get: if id.size() >= 13;
+      allow create: if validSave();
+      allow update: if validSave() && request.resource.data.rev > resource.data.rev;
+      allow list, delete: if false;
+    }
+  }
+}

@@ -90,7 +90,7 @@
     };
   }
   function fresh() {
-    return { v: 2, cur: 0, ach: {}, mute: false, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
+    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, mute: false, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
   }
   function mergeWorld(w, d) {
     const g = freshWorld(w);
@@ -102,28 +102,85 @@
     if (w === 0) g.u = true;
     return g;
   }
-  function load() {
+  // ---------- profiles (one save per player, each synced to the cloud by its secret code) ----------
+  const PROFILES_KEY = 'rudrasFarm.profiles';
+  const saveKey = code => 'rudrasFarm.save.' + code;
+  const CODE_WORDS = ['TIGER', 'PANDA', 'HIPPO', 'KOALA', 'ZEBRA', 'OTTER', 'LLAMA', 'EAGLE', 'SHARK', 'WHALE', 'MANGO', 'LEMON',
+    'ROBOT', 'CANDY', 'PIZZA', 'TRUCK', 'HONEY', 'BUNNY', 'PUPPY', 'KITTY', 'STARS', 'CLOUD', 'RIVER', 'MAPLE'];
+  const CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+  function newCode() {
+    const r = new Uint32Array(9);
+    crypto.getRandomValues(r);
+    let c = CODE_WORDS[r[0] % CODE_WORDS.length];
+    for (let i = 1; i < 9; i++) c += CODE_CHARS[r[i] % CODE_CHARS.length];
+    return c;
+  }
+  const cleanCode = v => String(v || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const validCode = c => /^[A-Z]{5}[2-9A-Z]{8}$/.test(c);
+  const prettyCode = c => `${c.slice(0, 5)}-${c.slice(5, 9)}-${c.slice(9)}`;
+  function readJSON(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function writeJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage blocked */ } }
+
+  let PR = readJSON(PROFILES_KEY);
+  const linkCode = cleanCode(new URLSearchParams(location.search).get('p'));
+  const old = readJSON(SAVE_KEY); // progress from before profiles existed (kept as a backup too)
+  if (!PR || !Array.isArray(PR.list) || !PR.list.length) {
+    PR = { cur: null, list: [] };
+    if (old || !validCode(linkCode)) {
+      const code = newCode();
+      PR = { cur: code, list: [{ code, name: 'Rudra', av: '🧒', auto: !old }] };
+      if (old) writeJSON(saveKey(code), old);
+    }
+  }
+  // opening a share link (?p=CODE) adds that profile on this device and switches to it
+  if (validCode(linkCode)) {
+    dropBlankDefaults(linkCode);
+    if (!PR.list.some(p => p.code === linkCode)) PR.list.push({ code: linkCode, name: '…', av: '🧒' });
+    PR.cur = linkCode;
+    history.replaceState(null, '', location.pathname);
+  }
+  if (!PR.list.some(p => p.code === PR.cur)) PR.cur = PR.list[0].code;
+  const saveProfiles = () => writeJSON(PROFILES_KEY, PR);
+  // forget the empty auto-created profile once this device joins a real one
+  function dropBlankDefaults(keep) {
+    PR.list = PR.list.filter(p => {
+      if (p.code === keep || !p.auto) return true;
+      const d = readJSON(saveKey(p.code));
+      const blank = !d || !d.worlds || d.worlds.every(g => !g.total);
+      if (blank) localStorage.removeItem(saveKey(p.code));
+      return !blank;
+    });
+  }
+  const curProfile = () => PR.list.find(p => p.code === PR.cur);
+  saveProfiles();
+
+  function parseSave(d) {
     const base = fresh();
-    try {
-      const d = JSON.parse(localStorage.getItem(SAVE_KEY));
-      if (!d) return base;
-      if (d.v === 1) { // single-farm save from the first version
-        base.worlds[0] = mergeWorld(0, d);
-      } else if (d.v === 2) {
-        base.worlds = WD.map((_, i) => mergeWorld(i, (d.worlds || [])[i]));
-        base.cur = base.worlds[d.cur] && base.worlds[d.cur].u ? d.cur : 0;
-        base.seen = WD.map((_, i) => !!(d.seen || [])[i] || i === base.cur);
-      } else return base;
-      base.ach = d.ach || {};
-      base.mute = !!d.mute;
-      if (d.last) base.last = d.last;
-    } catch (e) { /* corrupted or blocked storage: start fresh */ }
+    if (!d) return base;
+    if (d.v === 1) { // single-farm save from the first version
+      base.worlds[0] = mergeWorld(0, d);
+    } else if (d.v === 2) {
+      base.worlds = WD.map((_, i) => mergeWorld(i, (d.worlds || [])[i]));
+      base.cur = base.worlds[d.cur] && base.worlds[d.cur].u ? d.cur : 0;
+      base.seen = WD.map((_, i) => !!(d.seen || [])[i] || i === base.cur);
+    } else return base;
+    base.ach = d.ach || {};
+    base.mute = !!d.mute;
+    base.rev = d.rev | 0;
+    base.pend = !!d.pend;
+    if (d.last) base.last = d.last;
     return base;
   }
-  let S = load();
+  const load = code => parseSave(readJSON(saveKey(code)));
+  let S = load(PR.cur);
+  let syncedSnap = null; // the state we last saw in the cloud (null = not known yet)
+  const snapshot = () => JSON.stringify(Object.assign({}, S, { last: 0, rev: 0, pend: false }));
   function save() {
     S.last = Date.now();
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* storage blocked */ }
+    const cp = curProfile();
+    if (cp.auto && progress(S) > 0) { delete cp.auto; saveProfiles(); }
+    if (syncedSnap !== null && snapshot() !== syncedSnap) S.pend = true;
+    writeJSON(saveKey(PR.cur), S);
   }
   // a world opens once the previous world's last animal is unlocked
   function unlockWorlds() {
@@ -480,7 +537,7 @@
         <div class="counter"><div class="awning"></div><div class="cashier">${WORK.cash.e}</div><div class="table"><div class="pile"></div><b class="stock"></b></div></div>
         <div class="actor truck"><span class="flip"><span class="body">${WORK.truck.e}</span></span><div class="carry"></div></div>
         <div class="actor col"><span class="flip"><span class="body">${WORK.col.e}</span></span><div class="carry"></div></div>
-        <div class="actor player"><span class="flip"><span class="body">🧒</span></span><div class="carry"></div></div>
+        <div class="actor player"><span class="flip"><span class="body">${curProfile().av}</span></span><div class="carry"></div></div>
         ${k === 0 ? '<div class="hint">👆</div>' : ''}
       </div>
       <div class="workers">${btn('n', A.a)}${btn('col', WORK.col.e)}${btn('cash', WORK.cash.e)}${btn('truck', WORK.truck.e)}</div>`;
@@ -774,14 +831,14 @@
     $('#resetBtn').onclick = () => $('#confirmRow').classList.remove('hidden');
     $('#noReset').onclick = () => $('#confirmRow').classList.add('hidden');
     $('#yesReset').onclick = () => {
-      const mute = S.mute;
-      S = fresh(); S.mute = mute;
-      bindWorld(); resetRT(); applyTheme();
-      save(); buildFarm(); renderLanes(); renderMap(); shownCoins = -1; refreshUI(); closeModal();
+      const mute = S.mute, rev = S.rev;
+      S = fresh(); S.mute = mute; S.rev = rev;
+      save(); reloadAll(); closeModal(); sync(true);
     };
   }
   $('#starBtn').addEventListener('click', showAchievements);
   $('#setBtn').addEventListener('click', showSettings);
+  $('#profBtn').addEventListener('click', () => showProfile());
 
   // ---------- offline & background earnings ----------
   // steady-state income of a fully automated lane (needs a collector plus a cashier or truck)
@@ -835,6 +892,178 @@
     $('#okOff').onclick = () => { ac(); sfx.coin(); flyCoins($('#okOff'), 6); closeModal(); };
   }
 
+  // ---------- cloud save (Firestore REST; the profile code is the document id) ----------
+  const FB_KEY = 'AIzaSyCOxqx3i4FyJ5mm8TymPe6kJNoYv2ItPxw'; // public web key; access is controlled by firestore.rules
+  const FB_URL = code => `https://firestore.googleapis.com/v1/projects/rudras-farm-game/databases/(default)/documents/saves/${code}?key=${FB_KEY}`;
+  async function cloudGet(code) {
+    const r = await fetch(FB_URL(code), { cache: 'no-store' });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error('cloud get ' + r.status);
+    const f = (await r.json()).fields || {};
+    const str = k => f[k] && f[k].stringValue;
+    return { rev: Number(f.rev && f.rev.integerValue) || 0, data: str('data'), name: str('name'), av: str('av') };
+  }
+  function cloudPut(code, rev, state, prof, keepalive) {
+    const body = JSON.stringify({ fields: {
+      rev: { integerValue: String(rev) },
+      data: { stringValue: JSON.stringify(Object.assign({}, state, { rev, pend: false })) },
+      name: { stringValue: String(prof.name || 'Player').slice(0, 30) },
+      av: { stringValue: prof.av || '🧒' },
+    } });
+    return fetch(FB_URL(code), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body, keepalive: !!keepalive })
+      .then(r => { if (!r.ok) throw new Error('cloud put ' + r.status); });
+  }
+  const progress = st => st.worlds.reduce((t, g) => t + g.total, 0);
+
+  let syncBusy = false, syncAgain = false, syncState = 'busy';
+  function setSync(st) {
+    syncState = st;
+    $('#syncDot').textContent = st === 'ok' ? '✅' : st === 'busy' ? '🔄' : '⚠️';
+    const line = $('#syncLine');
+    if (line) line.textContent = st === 'ok' ? '☁️ ✅' : st === 'busy' ? '☁️ 🔄' : '☁️ ⚠️ offline';
+  }
+  async function sync(force) {
+    if (syncBusy) { syncAgain = true; return; }
+    syncBusy = true; setSync('busy');
+    const code = PR.cur;
+    try {
+      const cloud = await cloudGet(code);
+      if (code !== PR.cur) return; // switched profile while waiting
+      const p = curProfile();
+      if (cloud && p.name === '…') { p.name = cloud.name || 'Player'; p.av = cloud.av || p.av; saveProfiles(); updateProfBtn(); }
+      let theirs = null;
+      try { theirs = cloud && cloud.data ? parseSave(JSON.parse(cloud.data)) : null; } catch (e) { /* unreadable cloud copy */ }
+      if (!force && theirs && cloud.rev > S.rev && (!S.pend || progress(theirs) > progress(S))) {
+        adopt(theirs, cloud.rev); // another device has newer progress
+      } else if (force || S.pend || !cloud || cloud.rev < S.rev) {
+        const rev = Math.max(cloud ? cloud.rev : 0, S.rev) + 1, snap = snapshot(), st = S;
+        await cloudPut(code, rev, st, p);
+        st.rev = rev;
+        if (st === S) { syncedSnap = snap; if (snapshot() === snap) S.pend = false; }
+        writeJSON(saveKey(code), st);
+      } else {
+        syncedSnap = snapshot();
+      }
+      setSync('ok');
+    } catch (e) {
+      setSync('off');
+    } finally {
+      syncBusy = false;
+      if (syncAgain) { syncAgain = false; setTimeout(() => sync(), 200); }
+    }
+  }
+  // fire-and-forget upload when the app is being hidden or closed
+  function pushNow() {
+    if (!S.pend) return;
+    const code = PR.cur, st = S, rev = S.rev + 1;
+    cloudPut(code, rev, st, curProfile(), true)
+      .then(() => { st.rev = rev; st.pend = false; writeJSON(saveKey(code), st); })
+      .catch(() => { /* next sync sorts it out */ });
+  }
+  function adopt(st, rev) {
+    S = st; S.rev = rev; S.pend = false;
+    writeJSON(saveKey(PR.cur), S);
+    syncedSnap = snapshot();
+    reloadAll();
+    applyOffline();
+  }
+  function silentAch() {
+    // no party for old progress, except a newly opened world (worth celebrating on first visit)
+    ACH.forEach(a => { if (!S.ach[a.id] && a.ok() && !/open$/.test(a.id)) S.ach[a.id] = Date.now(); });
+  }
+  function reloadAll() {
+    celQueue.length = 0;
+    bindWorld(); resetRT(); applyTheme();
+    buildFarm(); renderLanes(); renderMap();
+    silentAch();
+    shownCoins = -1; shownStars = -1; refreshUI(); updateProfBtn();
+  }
+  function updateProfBtn() { $('#profAv').textContent = curProfile().av; }
+  function switchProfile(code) {
+    save(); pushNow();
+    PR.cur = code; saveProfiles();
+    S = load(code); syncedSnap = null;
+    reloadAll(); closeModal();
+    lastT = performance.now();
+    sync();
+  }
+
+  let qrLib = null;
+  function loadQR() {
+    if (!qrLib) qrLib = new Promise((ok, fail) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+      sc.onload = ok; sc.onerror = () => { qrLib = null; fail(); };
+      document.head.appendChild(sc);
+    });
+    return qrLib;
+  }
+  const esc = t => String(t).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  const AVATARS = ['🧒', '👦', '👧', '🧑', '👨', '👩', '🐶', '🐱', '🦁', '🐼', '🐯', '🦖'];
+  function showProfile() {
+    ac(); sfx.pop();
+    const p = curProfile();
+    const link = location.origin + location.pathname + '?p=' + p.code;
+    const others = PR.list.filter(x => x.code !== p.code);
+    openModal(`<h2 class="pav" id="pAv">${p.av}</h2>
+      <input id="pName" class="pname" maxlength="20" value="${esc(p.name)}" aria-label="Name">
+      <div class="avs">${AVATARS.map(a => `<button class="av${a === p.av ? ' on' : ''}">${a}</button>`).join('')}</div>
+      <div class="cloudbox">
+        <div class="syncline" id="syncLine"></div>
+        <div class="qr" id="qr"></div>
+        <div class="pcode">${prettyCode(p.code)}</div>
+        <div class="phint">📱 💻 Scan, share or type this code on another device to keep playing there.</div>
+        <button class="bigbtn can" id="shareBtn">📤 Share</button>
+      </div>
+      ${others.length ? `<div class="plist">${others.map(o => `<button class="pbtn" data-c="${o.code}"><span>${o.av}</span>${esc(o.name)}</button>`).join('')}</div>` : ''}
+      <div class="setrow"><button class="bigbtn" id="newProf">➕ 🧒</button><button class="bigbtn" id="joinBtn">🔑</button></div>
+      <div class="setrow hidden" id="joinRow"><input id="joinCode" class="pname" placeholder="TIGER-XXXX-XXXX" autocapitalize="characters" autocomplete="off"><button class="bigbtn can" id="joinGo">✅</button></div>`);
+    setSync(syncState);
+    $('#pName').addEventListener('change', e => {
+      p.name = e.target.value.trim().slice(0, 20) || 'Player';
+      saveProfiles(); S.pend = true; save(); sync();
+    });
+    document.querySelectorAll('#sheet .av').forEach(b => b.addEventListener('click', () => {
+      p.av = b.textContent; saveProfiles(); S.pend = true; save(); sync();
+      document.querySelectorAll('#sheet .av').forEach(x => x.classList.toggle('on', x === b));
+      $('#pAv').textContent = p.av; updateProfBtn(); renderLanes(); sfx.pop();
+    }));
+    $('#shareBtn').addEventListener('click', async e => {
+      const btn = e.currentTarget;
+      try {
+        if (navigator.share) await navigator.share({ title: "Rudra's Farm", text: `${p.name}'s farm: ${prettyCode(p.code)}`, url: link });
+        else { await navigator.clipboard.writeText(link); btn.textContent = '✅ 📋'; }
+      } catch (err) { /* share sheet closed */ }
+    });
+    loadQR().then(() => {
+      const q = window.qrcode(0, 'M'); q.addData(link); q.make();
+      const box = $('#qr'); if (box) box.innerHTML = q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+    }).catch(() => { const box = $('#qr'); if (box) box.remove(); });
+    document.querySelectorAll('#sheet .pbtn').forEach(b => b.addEventListener('click', () => { sfx.buy(); switchProfile(b.dataset.c); }));
+    $('#newProf').addEventListener('click', () => {
+      const code = newCode();
+      PR.list.push({ code, name: 'Player ' + (PR.list.length + 1), av: AVATARS[PR.list.length % AVATARS.length] });
+      saveProfiles(); sfx.buy();
+      switchProfile(code);
+      showProfile();
+    });
+    $('#joinBtn').addEventListener('click', () => { $('#joinRow').classList.remove('hidden'); $('#joinCode').focus(); });
+    $('#joinGo').addEventListener('click', async e => {
+      const btn = e.currentTarget, code = cleanCode($('#joinCode').value);
+      if (!validCode(code)) return shake(btn);
+      if (PR.list.some(x => x.code === code)) return switchProfile(code);
+      btn.textContent = '🔄';
+      try {
+        const cloud = await cloudGet(code);
+        if (!cloud) { btn.textContent = '❓'; return shake(btn); }
+        PR.list.push({ code, name: cloud.name || 'Player', av: cloud.av || '🧒' });
+        saveProfiles(); sfx.buy();
+        switchProfile(code);
+        dropBlankDefaults(code); saveProfiles();
+      } catch (err) { btn.textContent = '⚠️'; shake(btn); }
+    });
+  }
+
   // ---------- main loop ----------
   let lastT = performance.now(), uiT = 0, saveT = 0, bgT = 0;
   function tick(now) {
@@ -872,10 +1101,12 @@
   }, 700);
 
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) save();
-    else { applyOffline(); lastT = performance.now(); }
+    if (document.hidden) { save(); pushNow(); }
+    else { applyOffline(); lastT = performance.now(); sync(); }
   });
-  window.addEventListener('pagehide', save);
+  window.addEventListener('pagehide', () => { save(); pushNow(); });
+  window.addEventListener('online', () => sync());
+  setInterval(() => { if (S.pend && !document.hidden) sync(); }, 30000);
   document.addEventListener('pointerdown', () => ac(), { once: true });
 
   // ---------- start ----------
@@ -883,14 +1114,15 @@
   buildFarm();
   renderLanes();
   renderMap();
-  // no party for old progress, except a newly opened world (worth celebrating on first visit)
-  ACH.forEach(a => { if (!S.ach[a.id] && a.ok() && !/open$/.test(a.id)) S.ach[a.id] = Date.now(); });
+  silentAch();
+  updateProfBtn();
   refreshUI();
   applyOffline();
   requestAnimationFrame(tick);
+  sync();
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
-  window.__farm = { get S() { return S; }, RT, mult, fmt, goWorld }; // handy for debugging
+  window.__farm = { get S() { return S; }, get PR() { return PR; }, RT, mult, fmt, goWorld, sync }; // handy for debugging
 })();
