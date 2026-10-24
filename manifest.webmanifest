@@ -1,0 +1,16 @@
+{
+  "name": "Rudra's Farm",
+  "short_name": "Rudra's Farm",
+  "description": "A happy idle farm game. Tap, collect, sell and grow your farm!",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#9fdcff",
+  "theme_color": "#5cc45c",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
