@@ -68,7 +68,25 @@
       ],
       build: [['🛠️', 'Workshop'], ['🏗️', 'Crane'], ['🏘️', 'Houses'], ['🌉', 'Bridge'], ['🏙️', 'City'], ['🚀', 'Rocket']],
     },
+    {
+      icon: '🌙', title: "Rudra's Space Farm", done: 'Planet Rudra', t1: '✨', wonder: 'space',
+      bg: ['#1d2257', '#3b3f8f', '#8f7fc4', '#6f5fa8'], fence: ['#c9d1e0', '#7d8aa3'], work: ['👨‍🚀', '👩‍🚀', '🛸'],
+      lanes: [
+        ['🌙', '🧀', '#eef0ff', '#d9d4ef', '#5b5fd6', '⭐', '🌟'],
+        ['👽', '🛸', '#e6ffe9', '#b9e8c0', '#22c55e', '🌟', '🪐'],
+        ['🤖', '🧸', '#e8f1ff', '#c3d3ea', '#3d8bff', '⚙️', '💫'],
+        ['🦄', '🌈', '#ffe8fb', '#efd0f0', '#ec4899', '🌸', '⭐'],
+        ['🦖', '🦴', '#e9f7df', '#bfdc9e', '#16a34a', '🌋', '🌿'],
+        ['🐉', '🪙', '#fff1d6', '#f0cf91', '#f59e0b', '🔥', '💎'],
+      ],
+      build: [['🏕️', 'Moon Camp'], ['🔭', 'Telescope'], ['🧪', 'Space Lab'], ['📡', 'Big Dish'], ['🌌', 'Galaxy Mall'], ['🪐', 'Planet Rudra']],
+    },
   ];
+  // delivery vehicle per upgrade tier (levels 1-3, 4-6, 7-9, 10), per world
+  const VEH = [['🛻', '🚚', '🚛', '🚁'], ['🛺', '🚐', '🚌', '🚁'], ['🚙', '🚌', '🚎', '🎈'], ['🛻', '🚛', '🚂', '🚁'], ['🛸', '🚀', '☄️', '🌠']];
+  const COL_RIDE = ['', '🛹', '🛴', '🚀'];
+  const CASH_HAT = ['', '🧢', '🎩', '👑'];
+  const tierOf = l => (l >= 10 ? 3 : l >= 7 ? 2 : l >= 4 ? 1 : 0);
   const WD = WORLD_DEFS.map((d, w) => {
     const scale = Math.pow(2, w);
     return Object.assign({}, d, {
@@ -81,6 +99,17 @@
     });
   });
 
+  // Wonders: giant projects that need several worlds and are paid with their coins,
+  // so finished worlds keep having something to save up for. Built in order.
+  // need: [world, building index] or [world, 'u'] (world opened)
+  const WONDERS = [
+    { id: 'train', e: '🚂', n: 'Train Station', fx: '📦 x2', need: [[0, 5], [1, 1]], cost: [[0, 5e7], [1, 2e5]] },
+    { id: 'fair', e: '🎠', n: 'Fun Fair', fx: '💰 x2', need: [[1, 5], [2, 'u']], cost: [[0, 1e9], [1, 5e7]] },
+    { id: 'castle', e: '🏯', n: "Rudra's Castle", fx: '💰 x3', need: [[0, 5], [1, 5], [2, 2]], cost: [[0, 5e9], [1, 5e8], [2, 1e7]] },
+    { id: 'space', e: '🛰️', n: 'Space Center', fx: '🌙 ✨', need: [[2, 5], [3, 5]], cost: [[0, 1e11], [1, 1e10], [2, 1e9], [3, 1e8]] },
+    { id: 'statue', e: '🗽', n: 'Golden Rudra', fx: '💰 x5', need: [[4, 5]], cost: [[0, 1e12], [1, 1e11], [2, 1e10], [3, 1e9], [4, 1e8]] },
+  ];
+
   // ---------- state ----------
   function freshWorld(w) {
     return {
@@ -90,7 +119,7 @@
     };
   }
   function fresh() {
-    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
+    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
   }
   function mergeWorld(w, d) {
     const g = freshWorld(w);
@@ -167,6 +196,7 @@
     base.ach = d.ach || {};
     base.mute = !!d.mute;
     base.silly = d.silly !== false;
+    base.wonders = d.wonders || {};
     base.rev = d.rev | 0;
     base.pend = !!d.pend;
     if (d.last) base.last = d.last;
@@ -187,7 +217,8 @@
   function unlockWorlds() {
     let opened = false;
     for (let w = 1; w < WD.length; w++) {
-      if (!S.worlds[w].u && S.worlds[w - 1].lanes[5].u) { S.worlds[w].u = true; opened = true; }
+      const ready = WD[w].wonder ? !!S.wonders[WD[w].wonder] : S.worlds[w - 1].lanes[5].u;
+      if (!S.worlds[w].u && ready) { S.worlds[w].u = true; opened = true; }
     }
     return opened;
   }
@@ -238,6 +269,8 @@
     ACH.push({ w, id: `w${w}done`, e: D.build[5].e, t: '👑', s: 5, ok: () => g().b[5] });
   }
 
+  WONDERS.forEach(x => ACH.push({ w: WD.length, id: 'wonder_' + x.id, e: x.e, t: '🗺️', s: 5, ok: () => !!S.wonders[x.id] }));
+
   // ---------- formulas ----------
   const colSpeed = l => 0.2 * (1 + 0.15 * (l - 1));
   const colCap = l => 3 + 2 * (l - 1);
@@ -257,6 +290,9 @@
   function mult(w = S.cur) {
     const b = S.worlds[w].b;
     let m = (1 + 0.02 * starCount()) * Math.pow(WORLD_BONUS, worldsDone());
+    if (S.wonders.fair) m *= 2;
+    if (S.wonders.castle) m *= 3;
+    if (S.wonders.statue) m *= 5;
     if (b[3]) m *= 2;
     if (b[4]) m *= 2;
     if (b[5]) m *= 3;
@@ -671,6 +707,24 @@
     E.truck.style.display = L.truck ? '' : 'none';
   }
 
+  // workers get new gear (and the stall gets fancier) every few upgrade levels
+  function applyTiers(k) {
+    const L = G.lanes[k], E = RT[k].el;
+    const tc = tierOf(L.col), ts = tierOf(L.cash), tt = tierOf(L.truck);
+    E.col.querySelector('.ride').textContent = COL_RIDE[tc];
+    E.col.querySelector('.hat').textContent = tc === 3 ? '👑' : '';
+    E.col.className = E.col.className.replace(/ ?t\d/g, '') + ' t' + tc;
+    E.col.classList.toggle('hashat', tc === 3);
+    E.cashier.querySelector('.hat').textContent = CASH_HAT[ts];
+    E.counter.className = 'counter s' + (L.cash ? ts : 0);
+    const veh = VEH[S.cur][tt];
+    E.truck.querySelector('.body').textContent = veh;
+    E.truck.classList.toggle('fly', tt === 3);
+    E.btns.truck.querySelector('.we').textContent = veh;
+    E.btns.col.querySelector('.wacc').textContent = COL_RIDE[tc];
+    E.btns.cash.querySelector('.wacc').textContent = CASH_HAT[ts];
+  }
+
   // ---------- building the page ----------
   const laneWrap = $('#lanes');
   const B_EL = [];
@@ -691,7 +745,7 @@
     sec.style.setProperty('--tint', A.tint);
     sec.style.setProperty('--dirt', A.dirt);
     sec.style.setProperty('--stripe', A.stripe);
-    const btn = (w, e) => `<button class="wbtn" data-w="${w}"><span class="we">${e}</span><span class="wl"></span><span class="wp">💰<b></b></span></button>`;
+    const btn = (w, e) => `<button class="wbtn" data-w="${w}"><span class="we">${e}</span><span class="wacc"></span><span class="wl"></span><span class="wp">💰<b></b></span></button>`;
     sec.innerHTML = `
       <div class="lane-head"><span>${A.a}</span><span class="lh-sold">${A.p} <b>0</b></span></div>
       <div class="scene">
@@ -701,9 +755,9 @@
         <div class="deco" style="left:30%;top:86%">${A.deco[1]}</div>
         <div class="road"></div>
         <div class="pen"><div class="ground"></div><div class="herd"></div><b class="gcount"></b></div>
-        <div class="counter"><div class="awning"></div><div class="cashier">${WORK.cash.e}</div><div class="table"><div class="pile"></div><b class="stock"></b></div></div>
+        <div class="counter"><div class="awning"></div><div class="cashier"><span class="hat"></span>${WORK.cash.e}</div><div class="table"><div class="pile"></div><b class="stock"></b></div></div>
         <div class="actor truck"><span class="flip"><span class="body">${WORK.truck.e}</span></span><div class="carry"></div></div>
-        <div class="actor col"><span class="flip"><span class="body">${WORK.col.e}</span></span><div class="carry"></div></div>
+        <div class="actor col"><span class="flip"><span class="body">${WORK.col.e}</span><span class="ride"></span></span><span class="hat"></span><div class="carry"></div></div>
         <div class="actor player"><span class="flip"><span class="body">${curProfile().av}</span></span><div class="carry"></div></div>
         ${k === 0 ? '<div class="hint">👆</div>' : ''}
       </div>
@@ -729,6 +783,7 @@
     R.el.counter.addEventListener('click', () => tapCounter(k));
     for (let i = 0; i < L.n; i++) addAnimal(k, false);
     setVisibility(k);
+    applyTiers(k);
     return sec;
   }
 
@@ -765,11 +820,82 @@
     mapEl.innerHTML = '';
     WD.forEach((D, w) => {
       const g = S.worlds[w];
+      const icon = g.u || !D.wonder ? D.icon : '❓'; // the secret world stays a mystery
       const b = el('button', 'wbub' + (w === S.cur ? ' cur' : '') + (g.u ? '' : ' locked') + (g.u && !S.seen[w] ? ' new' : ''),
-        `<span class="wi">${D.icon}</span><span class="wc">${g.u ? fmt(g.coins) : '🔒'}</span>`);
+        `<span class="wi">${icon}</span><span class="wc">${g.u ? fmt(g.coins) : '🔒'}</span>`);
       b.addEventListener('click', () => g.u ? goWorld(w) : shake(b));
       mapEl.appendChild(b);
     });
+    const m = el('button', 'wbub mapbtn', `<span class="wi">🗺️</span><span class="wc"></span>`);
+    m.addEventListener('click', () => showMap());
+    mapEl.appendChild(m);
+    refreshMapBtn();
+  }
+  // ---------- wonders ----------
+  const wonderBuilt = x => !!S.wonders[x.id];
+  function needMet(x) {
+    const i = WONDERS.indexOf(x);
+    if (i > 0 && !wonderBuilt(WONDERS[i - 1])) return false;
+    return x.need.every(([w, b]) => (b === 'u' ? S.worlds[w].u : S.worlds[w].b[b]));
+  }
+  const canPay = x => x.cost.every(([w, c]) => S.worlds[w].coins >= c);
+  const wonderReady = x => !wonderBuilt(x) && needMet(x) && canPay(x);
+  function refreshMapBtn() {
+    const m = mapEl.querySelector('.mapbtn'); if (!m) return;
+    m.lastChild.textContent = WONDERS.filter(wonderBuilt).length + '/' + WONDERS.length;
+    m.classList.toggle('new', WONDERS.some(wonderReady));
+  }
+  function buildWonder(x, btn) {
+    ac();
+    if (!wonderReady(x)) return shake(btn);
+    x.cost.forEach(([w, c]) => { S.worlds[w].coins -= c; });
+    S.wonders[x.id] = Date.now();
+    const opened = unlockWorlds();
+    save(); closeModal(); renderMap(); refreshUI();
+    celebrate(x.e, 0, x.n + '!');
+    setTimeout(() => confetti(220), 500);
+    if (opened) setTimeout(() => showMap(), 3200);
+  }
+  function showMap(sel) {
+    ac(); sfx.pop();
+    // the road: world, wonder, world, wonder, ...
+    const stops = [];
+    WD.forEach((D, w) => { stops.push({ w }); if (WONDERS[w]) stops.push({ x: WONDERS[w] }); });
+    const chip = (ok, html) => `<span class="chip ${ok ? 'ok' : 'no'}">${html} ${ok ? '✅' : '❌'}</span>`;
+    const rows = stops.map((st, i) => {
+      const side = i % 2 ? 'r' : 'l';
+      if (st.w != null) {
+        const D = WD[st.w], g = S.worlds[st.w];
+        const icon = g.u || !D.wonder ? D.icon : '❓';
+        return `<div class="mstop ${side}"><button class="mnode world${g.u ? '' : ' locked'}${st.w === S.cur ? ' cur' : ''}" data-w="${st.w}">${icon}</button>
+          <div class="mlabel">${g.u ? '💰 ' + fmt(g.coins) : '🔒'}${g.b[5] ? ' 👑' : ''}</div></div>`;
+      }
+      const x = st.x, built = wonderBuilt(x), ready = wonderReady(x), open = sel === x.id;
+      const prev = WONDERS[WONDERS.indexOf(x) - 1];
+      const detail = open && !built ? `<div class="wdetail">
+          <div class="wfx">${x.fx}</div>
+          <div class="chips">${prev ? chip(wonderBuilt(prev), prev.e) : ''}${x.need.map(([w, b]) => chip(b === 'u' ? S.worlds[w].u : S.worlds[w].b[b], WD[w].icon + (b === 'u' ? '🔓' : WD[w].build[b].e))).join('')}</div>
+          <div class="chips">${x.cost.map(([w, c]) => chip(S.worlds[w].coins >= c, `${WD[w].icon} 💰${fmt(c)}`)).join('')}</div>
+          <button class="bigbtn${ready ? ' can' : ''}" data-build="${x.id}">🔨 ${x.e}</button></div>` : '';
+      return `<div class="mstop ${side}"><button class="mnode wonder${built ? ' built' : ready ? ' ready' : needMet(x) ? '' : ' locked'}" data-x="${x.id}">${x.e}</button>
+        <div class="mlabel">${x.n}${built ? ' ⭐' : ''}</div>${detail}</div>`;
+    }).join('');
+    openModal(`<h2>🗺️</h2><div class="map">${rows}</div>`);
+    document.querySelectorAll('#sheet .mnode.world').forEach(b => b.addEventListener('click', () => {
+      const w = +b.dataset.w;
+      if (!S.worlds[w].u) return shake(b);
+      closeModal(); goWorld(w);
+    }));
+    document.querySelectorAll('#sheet .mnode.wonder').forEach(b => b.addEventListener('click', () => {
+      const x = WONDERS.find(y => y.id === b.dataset.x);
+      if (wonderBuilt(x)) { sfx.boing(); b.classList.remove('wiggle'); void b.offsetWidth; b.classList.add('wiggle'); return; }
+      showMap(sel === x.id ? null : x.id);
+    }));
+    const bb = $('#sheet [data-build]');
+    if (bb) {
+      bb.addEventListener('click', () => buildWonder(WONDERS.find(y => y.id === bb.dataset.build), bb));
+      bb.closest('.mstop').scrollIntoView({ block: 'center' });
+    }
   }
   function applyTheme() {
     const D = WD[S.cur], r = document.documentElement.style;
@@ -788,14 +914,20 @@
     sfx.buy(); buzz(20);
   }
 
+  // the world's buildings stand in a little town; bought ones appear, the next one is for sale
+  const PLOTS = [[13, 70], [27, 40], [73, 40], [87, 70], [50, 78], [50, 24]];
   function buildFarm() {
     const c = $('#buildings');
-    c.innerHTML = `<div class="farm-title" id="farmTitle"></div><div class="btiles"></div>`;
-    const tiles = c.querySelector('.btiles');
+    c.innerHTML = `<div class="farm-title" id="farmTitle"></div><div class="town" id="town"><div class="hill"></div>
+      <span class="tdeco" style="left:3%;top:12%">☁️</span><span class="tdeco" style="left:84%;top:6%">☁️</span>
+      <span class="tdeco" style="left:40%;top:52%">🌳</span><span class="tdeco" style="left:60%;top:58%">🌳</span></div>`;
+    const town = c.querySelector('.town');
     BUILD.forEach((b, i) => {
-      const t = el('button', 'btile', `<span class="be">${b.e}</span><span class="bn">${b.n}</span><span class="bfx">${b.fx}</span><span class="bp">💰${fmt(b.cost)}</span>`);
+      const t = el('button', 'plot', `<span class="be">${b.e}</span><span class="bn">${b.n}</span><span class="bfx">${b.fx}</span><span class="bp">💰${fmt(b.cost)}</span><span class="sign">🪧</span>`);
+      t.style.left = PLOTS[i][0] + '%'; t.style.top = PLOTS[i][1] + '%';
+      if (i === 5) t.classList.add('big');
       t.addEventListener('click', () => buyBuilding(i, t));
-      tiles.appendChild(t); B_EL[i] = t;
+      town.appendChild(t); B_EL[i] = t;
     });
   }
 
@@ -823,8 +955,10 @@
         setVisibility(k);
       }
       const at = w === 'col' ? [R.col.x, 0.55] : w === 'cash' ? [0.815, 0.2] : [Math.min(R.truck.x, 0.9), 0.6];
-      floatText(k, at[0], at[1], lvl === 0 ? '🎉' : '⬆️', true);
-      if (lvl === 0) sfx.yippee(); else sfx.slideUp();
+      const newLook = lvl > 0 && tierOf(L[w]) > tierOf(lvl);
+      floatText(k, at[0], at[1], lvl === 0 ? '🎉' : newLook ? '✨ NEW ✨' : '⬆️', true);
+      if (newLook) { sfx.partyHorn(); confetti(40); } else if (lvl === 0) sfx.yippee(); else sfx.slideUp();
+      applyTiers(k);
     }
     buzz(20);
     refreshUI(); save();
@@ -845,7 +979,14 @@
 
   function buyBuilding(i, t) {
     ac();
-    if (G.b[i]) { tapFx(t); sfx.pop(); return; }
+    if (G.b[i]) { // owned: wiggle and show what it does
+      t.classList.remove('wiggle'); void t.offsetWidth; t.classList.add('wiggle');
+      sfx.boing();
+      const f = el('div', 'float big', BUILD[i].fx);
+      f.style.left = PLOTS[i][0] + '%'; f.style.top = (PLOTS[i][1] - 18) + '%';
+      $('#town').appendChild(f); setTimeout(() => f.remove(), 1150);
+      return;
+    }
     const next = G.b.indexOf(false);
     if (i !== next || G.coins < BUILD[i].cost) return shake(t);
     G.coins -= BUILD[i].cost; G.b[i] = true;
@@ -904,7 +1045,7 @@
 
     const next = G.b.indexOf(false);
     B_EL.forEach((t, i) => {
-      const cls = 'btile ' + (G.b[i] ? 'owned' : i === next ? 'next' + (G.coins >= BUILD[i].cost ? ' can' : '') : 'future');
+      const cls = 'plot' + (i === 5 ? ' big' : '') + ' ' + (G.b[i] ? 'owned' : i === next ? 'next' + (G.coins >= BUILD[i].cost ? ' can' : '') : 'future');
       if (t._cls !== cls) { t.className = cls; t._cls = cls; }
     });
     const title = $('#farmTitle');
@@ -916,6 +1057,7 @@
       const b = mapEl.children[w];
       if (b && g.u) b.lastChild.textContent = fmt(g.coins);
     });
+    refreshMapBtn();
   }
 
   // ---------- achievements & celebration ----------
@@ -990,7 +1132,7 @@
   function showAchievements() {
     ac(); sfx.pop();
     const tile = a => `<div class="ach${S.ach[a.id] ? ' got' : ''}"><div class="ae">${a.e}</div><div class="at">${a.t}</div><div class="as">${'⭐'.repeat(a.s)}</div></div>`;
-    const tiles = WD.map((D, w) => `<div class="agroup">${D.icon}</div>` + ACH.filter(a => a.w === w).map(tile).join('')).join('');
+    const tiles = [...WD.map(D => D.icon), '🗺️'].map((icon, w) => `<div class="agroup">${icon}</div>` + ACH.filter(a => a.w === w).map(tile).join('')).join('');
     const pct = Math.round(starCount() * 2);
     openModal(`<h2>⭐ ${starCount()}</h2><div class="agrid">${tiles}</div><div class="bonus">⭐ = 💰 +${pct}%</div>`);
   }
@@ -1061,7 +1203,7 @@
       if (!g.u) return;
       const secs = Math.min(away, g.b[2] ? 8 * 3600 : 2 * 3600);
       longest = Math.max(longest, secs);
-      const c = simWorld(w, secs, g.b[2] ? 1 : 0.5);
+      const c = simWorld(w, secs, (g.b[2] ? 1 : 0.5) * (S.wonders.train ? 2 : 1));
       if (c >= 1) lines.push(`<div class="oc">${WD[w].icon} +${fmt(c)} 💰</div>`);
     });
     if (!lines.length) return;
@@ -1256,7 +1398,7 @@
     });
     bgT += dt;
     if (bgT >= 1) {
-      S.worlds.forEach((g, w) => { if (g.u && w !== S.cur) simWorld(w, bgT, 1); });
+      S.worlds.forEach((g, w) => { if (g.u && w !== S.cur) simWorld(w, bgT, S.wonders.train ? 2 : 1); });
       bgT = 0;
     }
     uiT += dt; saveT += dt;
@@ -1304,7 +1446,7 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
-  window.__farm = { get S() { return S; }, get PR() { return PR; }, RT, mult, fmt, goWorld, sync,
+  window.__farm = { get S() { return S; }, get PR() { return PR; }, RT, mult, fmt, goWorld, sync, showMap, WONDERS,
     // test hook: render sounds into an OfflineAudioContext
     audio: { VOICES, fart, sfx, voice(n) { voiceGain = VOICE_GAIN[n] || 1; VOICES[n](); voiceGain = 1; }, useContext(ctx) { AC = ctx; OUT = ctx.destination; NOISE = null; } } }; // handy for debugging
 })();

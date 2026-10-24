@@ -1,5 +1,5 @@
 // Offline cache: serve from cache instantly, refresh in the background.
-const CACHE = 'rudras-farm-v4';
+const CACHE = 'rudras-farm-v5';
 const ASSETS = ['./', 'index.html', 'style.css', 'game.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png'];
 
