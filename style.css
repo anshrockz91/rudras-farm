@@ -3,13 +3,15 @@
   --wood2: #8a5426;
   --ink: #3b2a1a;
   --card: #fffdf6;
+  --bg1: #8fd8ff; --bg2: #c9f1ff; --bg3: #bfe9a0; --bg4: #a7dd80;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 html, body { margin: 0; }
 body {
   font-family: 'Fredoka', ui-rounded, 'Segoe UI', system-ui, sans-serif;
   color: var(--ink);
-  background: linear-gradient(#8fd8ff 0, #c9f1ff 220px, #bfe9a0 220px, #a7dd80 100%) fixed;
+  background: linear-gradient(var(--bg1) 0, var(--bg2) 220px, var(--bg3) 220px, var(--bg4) 100%) fixed;
+  transition: background .4s;
   min-height: 100vh;
   touch-action: manipulation;
   overflow-x: hidden;
@@ -44,7 +46,7 @@ main { max-width: 780px; margin: 0 auto; padding: 14px 16px calc(40px + env(safe
 }
 
 /* ---------- farm buildings ---------- */
-.farm-title { text-align: center; font-size: 28px; font-weight: 700; margin: 2px 0 10px; }
+.farm-title { text-align: center; font-size: clamp(18px, 5.6vw, 28px); font-weight: 700; margin: 2px 0 10px; white-space: nowrap; }
 .farm-title.company { font-size: clamp(18px, 5.4vw, 30px); white-space: nowrap; }
 .farm-title .gt { background: linear-gradient(90deg, #ff7a00, #ffb300, #ff7a00); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .btiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
@@ -113,7 +115,7 @@ main { max-width: 780px; margin: 0 auto; padding: 14px 16px calc(40px + env(safe
 
 .counter { position: absolute; left: 67%; top: 10%; width: 29%; height: 58%; cursor: pointer; transition: transform .1s; }
 .counter::before, .counter::after {
-  content: ''; position: absolute; top: 20%; bottom: 30%; width: 7px; background: var(--wood2); border-radius: 3px;
+  content: ''; position: absolute; top: 20%; bottom: 30%; width: 7px; background: #8a5426; border-radius: 3px;
 }
 .counter::before { left: 4%; } .counter::after { right: 4%; }
 .awning {
@@ -124,7 +126,7 @@ main { max-width: 780px; margin: 0 auto; padding: 14px 16px calc(40px + env(safe
 }
 .table {
   position: absolute; left: 0; right: 0; bottom: 0; height: 42%; z-index: 2;
-  background: var(--wood); border-radius: 8px; box-shadow: inset 0 -6px 0 var(--wood2);
+  background: #b9773b; border-radius: 8px; box-shadow: inset 0 -6px 0 #8a5426;
 }
 .pile {
   position: absolute; left: 0; right: 0; bottom: 100%; display: flex; flex-wrap: wrap-reverse; justify-content: center;
@@ -263,3 +265,26 @@ main { max-width: 780px; margin: 0 auto; padding: 14px 16px calc(40px + env(safe
 @keyframes celIn { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .cel-rays { animation: none; } }
+
+/* world map */
+.worlds { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.wbub {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 8px 2px 6px; border-radius: 22px; background: rgba(255, 255, 255, .85);
+  box-shadow: 0 5px 0 rgba(0, 0, 0, .12);
+}
+.wbub:active { transform: translateY(3px); box-shadow: 0 2px 0 rgba(0, 0, 0, .12); }
+.wbub .wi { font-size: 40px; line-height: 1.1; }
+.wbub .wc { font-size: 15px; font-weight: 700; background: #fff3b8; border-radius: 999px; padding: 0 8px; }
+.wbub.cur { background: #fff; outline: 4px solid #ffc83d; }
+.wbub.locked { opacity: .55; }
+.wbub.locked .wi { filter: grayscale(1); }
+.wbub.locked .wc { background: transparent; }
+.wbub.new { animation: glow 1.2s infinite; }
+.wbub.new::after { content: '✨'; position: absolute; top: -8px; right: -4px; font-size: 22px; }
+.nextworld { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 18px; background: linear-gradient(#fff6c9, #ffe27a); }
+.nw-e { font-size: 90px; line-height: 1; animation: bob .7s infinite alternate; }
+.agroup { grid-column: 1 / -1; font-size: 30px; text-align: center; border-top: 3px dashed #e6dcc4; padding-top: 8px; margin-top: 4px; }
+.agroup:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
+.offline .oc { font-size: 34px; margin: 4px 0; }
+.offline .bigbtn { margin-top: 14px; }

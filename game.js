@@ -1,57 +1,184 @@
 'use strict';
 (() => {
   // ---------- config ----------
-  const SAVE_KEY = 'rudrasFarm.v1';
+  const SAVE_KEY = 'rudrasFarm.v1'; // same key as v1 so existing farm progress carries over
   const PEN_X = 0.34, COUNTER_X = 0.63, TRUCK_STOP = 0.80, TRUCK_OUT = 1.25;
   const PLAYER_SPEED = 0.75, PLAYER_CAP = 15, MAXLVL = 10, MAX_ANIMALS = 5;
 
-  const ANIMALS = [
-    { a: '🐔', p: '🥚', price: 1,     time: 2,   tint: '#fff1bf', dirt: '#ecd39b', stripe: '#ff5a5a', deco: ['🌾', '🌼'] },
-    { a: '🐄', p: '🥛', price: 8,     time: 2.5, tint: '#dcf3c8', dirt: '#b8e08f', stripe: '#3d8bff', deco: ['🌿', '🌷'], unlock: { need: 100, cost: 250 } },
-    { a: '🐑', p: '🧶', price: 50,    time: 3,   tint: '#e3ebff', dirt: '#c8e6a6', stripe: '#a259ff', deco: ['🌼', '🌸'], unlock: { need: 80, cost: 2500 } },
-    { a: '🐖', p: '🍄', price: 300,   time: 3.5, tint: '#ffdde5', dirt: '#c69a6a', stripe: '#ff7eb6', deco: ['🌳', '🌰'], unlock: { need: 60, cost: 20000 } },
-    { a: '🐝', p: '🍯', price: 2000,  time: 3,   tint: '#fff4c2', dirt: '#bfe58f', stripe: '#ffb000', deco: ['🌻', '🌸'], unlock: { need: 50, cost: 150000 } },
-    { a: '🐎', p: '🎟️', price: 12000, time: 4,   tint: '#f5e3cf', dirt: '#e3c48e', stripe: '#00b37a', deco: ['🥕', '🌳'], unlock: { need: 40, cost: 1000000 } },
-  ];
-  const WORK = {
-    col:   { e: '🧑‍🌾', base: 10 },
-    cash:  { e: '🧑‍💼', base: 25 },
-    truck: { e: '🚚', base: 120 },
-  };
-  const BUILD = [
-    { e: '🛖', n: 'Coop',      fx: '🐔⚡x2',  cost: 300 },
-    { e: '🏡', n: 'Barn',      fx: '⚡x1.5',  cost: 5000 },
-    { e: '🏠', n: 'Farmhouse', fx: '💤x2',    cost: 40000 },
-    { e: '🏪', n: 'Shop',      fx: '💰x2',    cost: 250000 },
-    { e: '🏭', n: 'Factory',   fx: '💰x2',    cost: 2000000 },
-    { e: '🏢', n: 'Company',   fx: '👑💰x3',  cost: 15000000 },
-  ];
+  // Every world shares one economy curve; only the look changes. Later worlds cost more.
+  const PRICE = [1, 8, 50, 300, 2000, 12000];
+  const TIME = [2, 2.5, 3, 3.5, 3, 4];
+  const NEED = [0, 100, 80, 60, 50, 40];
+  const UNLOCK = [0, 250, 2500, 20000, 150000, 1000000];
+  const BCOST = [300, 5000, 40000, 250000, 2000000, 15000000];
+  const BFX = ['⚡x2', '⚡x1.5', '💤x2', '💰x2', '💰x2', '👑💰x3'];
+  const WORLD_BONUS = 1.5; // every finished world (last building bought) boosts all worlds
 
-  const anyLane = f => S.lanes.some((L, k) => L.u && f(L, k));
+  // lanes: [animal, product, card tint, pen ground, awning stripe, deco1, deco2]
+  const WORLD_DEFS = [
+    {
+      icon: '🚜', title: "Rudra's Farm", done: "Rudra's Farm Company", t1: '🌻',
+      bg: ['#8fd8ff', '#c9f1ff', '#bfe9a0', '#a7dd80'], fence: ['#b9773b', '#8a5426'], work: ['🧑‍🌾', '🧑‍💼', '🚚'],
+      lanes: [
+        ['🐔', '🥚', '#fff1bf', '#ecd39b', '#ff5a5a', '🌾', '🌼'],
+        ['🐄', '🥛', '#dcf3c8', '#b8e08f', '#3d8bff', '🌿', '🌷'],
+        ['🐑', '🧶', '#e3ebff', '#c8e6a6', '#a259ff', '🌼', '🌸'],
+        ['🐖', '🍄', '#ffdde5', '#c69a6a', '#ff7eb6', '🌳', '🌰'],
+        ['🐝', '🍯', '#fff4c2', '#bfe58f', '#ffb000', '🌻', '🌸'],
+        ['🐎', '🎟️', '#f5e3cf', '#e3c48e', '#00b37a', '🥕', '🌳'],
+      ],
+      build: [['🛖', 'Coop'], ['🏡', 'Barn'], ['🏠', 'Farmhouse'], ['🏪', 'Shop'], ['🏭', 'Factory'], ['🏢', 'Company']],
+    },
+    {
+      icon: '🐶', title: "Rudra's Puppy Town", done: "Rudra's Pet Palace", t1: '🐾',
+      bg: ['#ffc9e6', '#ffeef7', '#c8f0b0', '#a9e38c'], fence: ['#ffffff', '#c7b3c7'], work: ['🧑‍⚕️', '🧑‍💼', '🚐'],
+      lanes: [
+        ['🐕', '🐶', '#ffe7d1', '#f6dcb8', '#ff8a3d', '🦴', '🎾'],
+        ['🐈', '🐱', '#ffe3f1', '#f8d4e6', '#ff5fa2', '🧶', '🐟'],
+        ['🐇', '🐰', '#e9f7dc', '#cdeeb0', '#57c84d', '🥕', '🌷'],
+        ['🐹', '🐹', '#fff3d6', '#f1dfb0', '#f5a623', '🌻', '🧀'],
+        ['🐢', '🐢', '#dff5f2', '#9fdfe8', '#14b8a6', '🌿', '🐚'],
+        ['🦜', '🦜', '#e5f0ff', '#cfe6c0', '#3d8bff', '🌴', '🍌'],
+      ],
+      build: [['⛺', 'Kennel'], ['🏥', 'Vet'], ['🏨', 'Pet Hotel'], ['🧸', 'Toy Shop'], ['🏬', 'Pet Mall'], ['🏰', 'Pet Palace']],
+    },
+    {
+      icon: '🦁', title: "Rudra's Safari Zoo", done: "Rudra's Mega Zoo", t1: '🌴',
+      bg: ['#ffd77a', '#fff3cf', '#e6d58a', '#d4c06a'], fence: ['#7a9a3a', '#4f6b1f'], work: ['🤠', '🧑‍💼', '🚌'],
+      lanes: [
+        ['🐊', '🎈', '#dcf5ff', '#7cc8e8', '#00a3d9', '🌿', '🐸'],
+        ['🐼', '🎋', '#eef7e6', '#cfe8b8', '#2e9e4f', '🍃', '🌸'],
+        ['🦘', '🥊', '#ffe9d6', '#e8c48e', '#ff5a3d', '🌵', '☀️'],
+        ['🐅', '📸', '#fff0d6', '#d9c47a', '#ff9a00', '🌴', '🌾'],
+        ['🦁', '👑', '#fff6c8', '#e3cf80', '#ffc400', '🌴', '🦴'],
+        ['🐘', '💦', '#e6eefc', '#a9cfe8', '#5b7cfa', '🌳', '🥜'],
+      ],
+      build: [['🎪', 'Big Tent'], ['🎡', 'Big Wheel'], ['🎢', 'Coaster'], ['🛍️', 'Gift Shop'], ['🏨', 'Zoo Hotel'], ['🏟️', 'Mega Zoo']],
+    },
+    {
+      icon: '🏗️', title: "Rudra's Builder Town", done: "Rudra's Rocket", t1: '🔨', still: true,
+      bg: ['#9fd3ff', '#e6f4ff', '#e8d3a8', '#d9bd86'], fence: ['#f5a623', '#b8730a'], work: ['👷', '🧑‍💼', '🚛'],
+      lanes: [
+        ['🌲', '🪵', '#e3f3d8', '#9ccf7a', '#2e9e4f', '🌲', '🍄'],
+        ['⛰️', '🪨', '#ececec', '#c9c2b5', '#7a7a7a', '🌵', '🌾'],
+        ['🔥', '🧱', '#ffe3d6', '#e8b08e', '#e2552e', '🪣', '⛏️'],
+        ['⚙️', '🔩', '#e6ecf2', '#c3ccd6', '#4a6fa5', '🔧', '🔨'],
+        ['⚡', '🔋', '#fff8d1', '#e9dd96', '#ffcc00', '💡', '🔌'],
+        ['⛏️', '💎', '#ece6ff', '#b9a9d9', '#8a5cf6', '🔦', '🪨'],
+      ],
+      build: [['🛠️', 'Workshop'], ['🏗️', 'Crane'], ['🏘️', 'Houses'], ['🌉', 'Bridge'], ['🏙️', 'City'], ['🚀', 'Rocket']],
+    },
+  ];
+  const WD = WORLD_DEFS.map((d, w) => {
+    const scale = Math.pow(2, w);
+    return Object.assign({}, d, {
+      lanes: d.lanes.map(([a, p, tint, dirt, stripe, d1, d2], k) => ({
+        a, p, tint, dirt, stripe, deco: [d1, d2], price: PRICE[k], time: TIME[k],
+        unlock: k ? { need: NEED[k] + 25 * w, cost: UNLOCK[k] * scale } : null,
+      })),
+      build: d.build.map(([e, n], i) => ({ e, n, fx: i === 0 ? d.lanes[0][0] + BFX[0] : BFX[i], cost: BCOST[i] * scale })),
+      work: { col: { e: d.work[0], base: 10 }, cash: { e: d.work[1], base: 25 }, truck: { e: d.work[2], base: 120 } },
+    });
+  });
+
+  // ---------- state ----------
+  function freshWorld(w) {
+    return {
+      u: w === 0, coins: 0, total: 0, b: [false, false, false, false, false, false],
+      lanes: [0, 1, 2, 3, 4, 5].map(i => ({ u: i === 0, n: 1, g: 0, st: 0, sold: 0, col: 0, cash: 0, truck: 0 })),
+      stats: { del: 0 },
+    };
+  }
+  function fresh() {
+    return { v: 2, cur: 0, ach: {}, mute: false, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
+  }
+  function mergeWorld(w, d) {
+    const g = freshWorld(w);
+    if (!d) return g;
+    ['u', 'coins', 'total'].forEach(f => { if (d[f] != null) g[f] = d[f]; });
+    g.lanes = g.lanes.map((L, i) => Object.assign(L, (d.lanes || [])[i] || {}));
+    g.b = g.b.map((_, i) => !!(d.b || [])[i]);
+    g.stats = Object.assign({ del: 0 }, d.stats);
+    if (w === 0) g.u = true;
+    return g;
+  }
+  function load() {
+    const base = fresh();
+    try {
+      const d = JSON.parse(localStorage.getItem(SAVE_KEY));
+      if (!d) return base;
+      if (d.v === 1) { // single-farm save from the first version
+        base.worlds[0] = mergeWorld(0, d);
+      } else if (d.v === 2) {
+        base.worlds = WD.map((_, i) => mergeWorld(i, (d.worlds || [])[i]));
+        base.cur = base.worlds[d.cur] && base.worlds[d.cur].u ? d.cur : 0;
+        base.seen = WD.map((_, i) => !!(d.seen || [])[i] || i === base.cur);
+      } else return base;
+      base.ach = d.ach || {};
+      base.mute = !!d.mute;
+      if (d.last) base.last = d.last;
+    } catch (e) { /* corrupted or blocked storage: start fresh */ }
+    return base;
+  }
+  let S = load();
+  function save() {
+    S.last = Date.now();
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* storage blocked */ }
+  }
+  // a world opens once the previous world's last animal is unlocked
+  function unlockWorlds() {
+    let opened = false;
+    for (let w = 1; w < WD.length; w++) {
+      if (!S.worlds[w].u && S.worlds[w - 1].lanes[5].u) { S.worlds[w].u = true; opened = true; }
+    }
+    return opened;
+  }
+  unlockWorlds();
+
+  // current-world bindings (rebound by bindWorld when travelling)
+  let G, ANIMALS, BUILD, WORK;
+  function bindWorld() {
+    G = S.worlds[S.cur];
+    ANIMALS = WD[S.cur].lanes; BUILD = WD[S.cur].build; WORK = WD[S.cur].work;
+  }
+  bindWorld();
+
+  const anyLane = f => S.worlds.some(g => g.u && g.lanes.some(L => L.u && f(L)));
+  const totalEarned = () => S.worlds.reduce((t, g) => t + g.total, 0);
+  const F = () => S.worlds[0];
   const ACH = [
-    { id: 'egg1',   e: '🥚', t: '1',    s: 1, ok: () => S.lanes[0].sold >= 1 },
-    { id: 'egg100', e: '🥚', t: '100',  s: 2, ok: () => S.lanes[0].sold >= 100 },
-    { id: 'egg1k',  e: '🥚', t: '1000', s: 3, ok: () => S.lanes[0].sold >= 1000 },
+    { id: 'egg1',   e: '🥚', t: '1',    s: 1, ok: () => F().lanes[0].sold >= 1 },
+    { id: 'egg100', e: '🥚', t: '100',  s: 2, ok: () => F().lanes[0].sold >= 100 },
+    { id: 'egg1k',  e: '🥚', t: '1000', s: 3, ok: () => F().lanes[0].sold >= 1000 },
     { id: 'col',    e: '🧑‍🌾', t: '',     s: 1, ok: () => anyLane(L => L.col > 0) },
     { id: 'cash',   e: '🧑‍💼', t: '',     s: 1, ok: () => anyLane(L => L.cash > 0) },
-    { id: 'truck',  e: '🚚', t: '',     s: 1, ok: () => S.stats.del >= 1 },
+    { id: 'truck',  e: '🚚', t: '',     s: 1, ok: () => S.worlds.some(g => g.stats.del >= 1) },
     { id: 'crew',   e: '🤝', t: '3',    s: 2, ok: () => anyLane(L => L.col && L.cash && L.truck) },
     { id: 'herd',   e: '🐔', t: '5',    s: 2, ok: () => anyLane(L => L.n >= MAX_ANIMALS) },
     { id: 'maxlvl', e: '🏅', t: '10',   s: 3, ok: () => anyLane(L => Math.max(L.col, L.cash, L.truck) >= MAXLVL) },
-    { id: 'c100',   e: '💰', t: '100',  s: 1, ok: () => S.total >= 100 },
-    { id: 'c1k',    e: '💰', t: '1K',   s: 1, ok: () => S.total >= 1e3 },
-    { id: 'c10k',   e: '💰', t: '10K',  s: 2, ok: () => S.total >= 1e4 },
-    { id: 'c100k',  e: '💰', t: '100K', s: 2, ok: () => S.total >= 1e5 },
-    { id: 'c1m',    e: '💰', t: '1M',   s: 3, ok: () => S.total >= 1e6 },
-    { id: 'c10m',   e: '💰', t: '10M',  s: 3, ok: () => S.total >= 1e7 },
-    { id: 'milk',   e: '🥛', t: '100',  s: 2, ok: () => S.lanes[1].sold >= 100 },
-    { id: 'honey',  e: '🍯', t: '100',  s: 2, ok: () => S.lanes[4].sold >= 100 },
-    { id: 'ride',   e: '🎟️', t: '100',  s: 3, ok: () => S.lanes[5].sold >= 100 },
-    ...[1, 2, 3, 4, 5].map(k => ({ id: 'u' + k, e: ANIMALS[k].a, t: '🔓', s: 2, ok: () => S.lanes[k].u })),
-    { id: 'coop',   e: '🛖', t: '',     s: 2, ok: () => S.b[0] },
-    { id: 'shop',   e: '🏪', t: '',     s: 3, ok: () => S.b[3] },
-    { id: 'company', e: '🏢', t: '👑',  s: 5, ok: () => S.b[5] },
-  ];
+    { id: 'c100',   e: '💰', t: '100',  s: 1, ok: () => totalEarned() >= 100 },
+    { id: 'c1k',    e: '💰', t: '1K',   s: 1, ok: () => totalEarned() >= 1e3 },
+    { id: 'c10k',   e: '💰', t: '10K',  s: 2, ok: () => totalEarned() >= 1e4 },
+    { id: 'c100k',  e: '💰', t: '100K', s: 2, ok: () => totalEarned() >= 1e5 },
+    { id: 'c1m',    e: '💰', t: '1M',   s: 3, ok: () => totalEarned() >= 1e6 },
+    { id: 'c10m',   e: '💰', t: '10M',  s: 3, ok: () => totalEarned() >= 1e7 },
+    { id: 'c100m',  e: '💰', t: '100M', s: 3, ok: () => totalEarned() >= 1e8 },
+    { id: 'c1b',    e: '💰', t: '1B',   s: 5, ok: () => totalEarned() >= 1e9 },
+    { id: 'milk',   e: '🥛', t: '100',  s: 2, ok: () => F().lanes[1].sold >= 100 },
+    { id: 'honey',  e: '🍯', t: '100',  s: 2, ok: () => F().lanes[4].sold >= 100 },
+    { id: 'ride',   e: '🎟️', t: '100',  s: 3, ok: () => F().lanes[5].sold >= 100 },
+    ...[1, 2, 3, 4, 5].map(k => ({ id: 'u' + k, e: WD[0].lanes[k].a, t: '🔓', s: 2, ok: () => F().lanes[k].u })),
+    { id: 'coop',   e: '🛖', t: '',     s: 2, ok: () => F().b[0] },
+    { id: 'shop',   e: '🏪', t: '',     s: 3, ok: () => F().b[3] },
+    { id: 'company', e: '🏢', t: '👑',  s: 5, ok: () => F().b[5] },
+  ].map(a => Object.assign({ w: 0 }, a));
+  for (let w = 1; w < WD.length; w++) {
+    const D = WD[w], g = () => S.worlds[w];
+    ACH.push({ w, id: `w${w}open`, e: D.icon, t: '🗺️', s: 3, ok: () => g().u });
+    ACH.push({ w, id: `w${w}p100`, e: D.lanes[0].p, t: '100', s: 2, ok: () => g().lanes[0].sold >= 100 });
+    for (let k = 1; k < 6; k++) ACH.push({ w, id: `w${w}u${k}`, e: D.lanes[k].a, t: '🔓', s: 2, ok: () => g().lanes[k].u });
+    ACH.push({ w, id: `w${w}done`, e: D.build[5].e, t: '👑', s: 5, ok: () => g().b[5] });
+  }
 
   // ---------- formulas ----------
   const colSpeed = l => 0.2 * (1 + 0.15 * (l - 1));
@@ -63,13 +190,18 @@
   const penCap = L => 6 + 3 * L.n;
   const workCost = (k, w, lvl) => Math.ceil(WORK[w].base * ANIMALS[k].price * Math.pow(1.75, lvl));
   const animalCost = (k, n) => Math.ceil(15 * ANIMALS[k].price * Math.pow(1.8, n - 1));
-  const prodTime = k => ANIMALS[k].time / ((k === 0 && S.b[0] ? 2 : 1) * (S.b[1] ? 1.5 : 1));
+  function prodTime(k, w = S.cur) {
+    const b = S.worlds[w].b;
+    return WD[w].lanes[k].time / ((k === 0 && b[0] ? 2 : 1) * (b[1] ? 1.5 : 1));
+  }
   const starCount = () => ACH.reduce((t, a) => t + (S.ach[a.id] ? a.s : 0), 0);
-  function mult() {
-    let m = 1 + 0.02 * starCount();
-    if (S.b[3]) m *= 2;
-    if (S.b[4]) m *= 2;
-    if (S.b[5]) m *= 3;
+  const worldsDone = () => S.worlds.filter(g => g.b[5]).length;
+  function mult(w = S.cur) {
+    const b = S.worlds[w].b;
+    let m = (1 + 0.02 * starCount()) * Math.pow(WORLD_BONUS, worldsDone());
+    if (b[3]) m *= 2;
+    if (b[4]) m *= 2;
+    if (b[5]) m *= 3;
     return m;
   }
   function fmt(n) {
@@ -81,41 +213,17 @@
     return (n < 10 ? Math.floor(n * 10) / 10 : Math.floor(n)) + u[i];
   }
 
-  // ---------- state ----------
-  function fresh() {
-    return {
-      v: 1, coins: 0, total: 0, ach: {}, b: BUILD.map(() => false),
-      lanes: ANIMALS.map((_, i) => ({ u: i === 0, n: 1, g: 0, st: 0, sold: 0, col: 0, cash: 0, truck: 0 })),
-      stats: { del: 0 }, mute: false, last: Date.now(),
-    };
+  // runtime-only objects per lane (rebuilt whenever the world changes)
+  const RT = [0, 1, 2, 3, 4, 5].map(() => ({ el: null }));
+  function resetRT() {
+    RT.forEach(R => Object.assign(R, {
+      player: { x: 0.5, carry: 0, goal: null },
+      col: { x: COUNTER_X, carry: 0, ph: 'toPen' },
+      truck: { x: TRUCK_OUT, ph: 'away', t: 1, load: 0 },
+      cashT: 0, gShown: -1, stShown: -1,
+    }));
   }
-  function load() {
-    const base = fresh();
-    try {
-      const d = JSON.parse(localStorage.getItem(SAVE_KEY));
-      if (!d || d.v !== 1) return base;
-      Object.assign(base, d);
-      base.lanes = fresh().lanes.map((L, i) => Object.assign(L, (d.lanes || [])[i] || {}));
-      base.b = BUILD.map((_, i) => !!(d.b || [])[i]);
-      base.stats = Object.assign({ del: 0 }, d.stats);
-      base.ach = d.ach || {};
-    } catch (e) { /* corrupted or blocked storage: start fresh */ }
-    return base;
-  }
-  let S = load();
-  function save() {
-    S.last = Date.now();
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* storage blocked */ }
-  }
-
-  // runtime-only objects per lane
-  const RT = ANIMALS.map(() => ({
-    el: null,
-    player: { x: 0.5, carry: 0, goal: null },
-    col: { x: COUNTER_X, carry: 0, ph: 'toPen' },
-    truck: { x: TRUCK_OUT, ph: 'away', t: 1, load: 0 },
-    cashT: 0, gShown: -1, stShown: -1,
-  }));
+  resetRT();
 
   // ---------- sound ----------
   let AC = null;
@@ -194,7 +302,7 @@
   function earn(k, n, bonus) {
     if (n <= 0) return 0;
     const v = n * ANIMALS[k].price * mult() * bonus;
-    S.coins += v; S.total += v; S.lanes[k].sold += n;
+    G.coins += v; G.total += v; G.lanes[k].sold += n;
     return v;
   }
 
@@ -217,7 +325,7 @@
   }
 
   function stepLane(k, dt) {
-    const L = S.lanes[k], R = RT[k], A = ANIMALS[k];
+    const L = G.lanes[k], R = RT[k], A = ANIMALS[k];
     // animals lay / produce
     const cap = penCap(L);
     if (L.g < cap) L.g = Math.min(cap, L.g + L.n * dt / prodTime(k));
@@ -273,7 +381,7 @@
       } else if (T.ph === 'out' && move(T, TRUCK_OUT, sp, dt)) {
         if (T.load > 0) {
           const v = earn(k, T.load, 1.5);
-          S.stats.del++; sfx.coin();
+          G.stats.del++; sfx.coin();
           floatText(k, 0.86, 0.6, '🚚 +' + fmt(v) + ' 💰', true);
           flyCoins(R.el.road, 4);
         }
@@ -306,7 +414,7 @@
     if (o._c !== c) { e.lastChild.innerHTML = c > 0 ? `${carryEmoji}<b>${c}</b>` : ''; o._c = c; }
   }
   function renderLane(k) {
-    const L = S.lanes[k], R = RT[k], E = R.el, A = ANIMALS[k];
+    const L = G.lanes[k], R = RT[k], E = R.el, A = ANIMALS[k];
     placeActor(E.player, R.player, A.p);
     if (L.col) placeActor(E.col, R.col, A.p);
     if (L.truck) placeActor(E.truck, R.truck, A.p);
@@ -333,7 +441,7 @@
     }
   }
   function setVisibility(k) {
-    const L = S.lanes[k], E = RT[k].el;
+    const L = G.lanes[k], E = RT[k].el;
     E.col.style.display = L.col ? '' : 'none';
     E.cashier.style.display = L.cash ? '' : 'none';
     E.truck.style.display = L.truck ? '' : 'none';
@@ -354,7 +462,7 @@
   }
 
   function buildLane(k) {
-    const A = ANIMALS[k], L = S.lanes[k], R = RT[k];
+    const A = ANIMALS[k], L = G.lanes[k], R = RT[k];
     const sec = el('section', 'card lane');
     sec.style.setProperty('--tint', A.tint);
     sec.style.setProperty('--dirt', A.dirt);
@@ -412,9 +520,44 @@
     laneWrap.innerHTML = '';
     RT.forEach(R => { R.el = null; });
     lockEl = null;
-    S.lanes.forEach((L, k) => { if (L.u) laneWrap.appendChild(buildLane(k)); });
-    const next = S.lanes.findIndex(L => !L.u);
+    G.lanes.forEach((L, k) => { if (L.u) laneWrap.appendChild(buildLane(k)); });
+    const next = G.lanes.findIndex(L => !L.u);
     if (next > 0) { lockEl = buildLock(next); laneWrap.appendChild(lockEl); }
+    const nw = S.cur + 1;
+    if (next < 0 && WD[nw] && S.worlds[nw].u) {
+      const card = el('section', 'card nextworld', `<div class="nw-e">${WD[nw].icon}</div><button class="bigbtn can">➡️ ${WD[nw].icon}</button>`);
+      card.querySelector('.bigbtn').addEventListener('click', () => goWorld(nw));
+      laneWrap.appendChild(card);
+    }
+  }
+
+  // ---------- worlds ----------
+  const mapEl = $('#worlds');
+  function renderMap() {
+    mapEl.innerHTML = '';
+    WD.forEach((D, w) => {
+      const g = S.worlds[w];
+      const b = el('button', 'wbub' + (w === S.cur ? ' cur' : '') + (g.u ? '' : ' locked') + (g.u && !S.seen[w] ? ' new' : ''),
+        `<span class="wi">${D.icon}</span><span class="wc">${g.u ? fmt(g.coins) : '🔒'}</span>`);
+      b.addEventListener('click', () => g.u ? goWorld(w) : shake(b));
+      mapEl.appendChild(b);
+    });
+  }
+  function applyTheme() {
+    const D = WD[S.cur], r = document.documentElement.style;
+    D.bg.forEach((c, i) => r.setProperty('--bg' + (i + 1), c));
+    r.setProperty('--wood', D.fence[0]);
+    r.setProperty('--wood2', D.fence[1]);
+  }
+  function goWorld(w) {
+    ac();
+    if (w === S.cur) { sfx.pop(); return; }
+    S.cur = w; S.seen[w] = true;
+    bindWorld(); resetRT(); applyTheme();
+    buildFarm(); renderLanes(); renderMap();
+    shownCoins = -1; refreshUI(); save();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    sfx.buy(); buzz(20);
   }
 
   function buildFarm() {
@@ -431,20 +574,20 @@
   // ---------- buying ----------
   function buy(k, w, btn) {
     ac();
-    const L = S.lanes[k], R = RT[k];
+    const L = G.lanes[k], R = RT[k];
     if (w === 'n') {
       if (L.n >= MAX_ANIMALS) return shake(btn);
       const c = animalCost(k, L.n);
-      if (S.coins < c) return shake(btn);
-      S.coins -= c; L.n++;
+      if (G.coins < c) return shake(btn);
+      G.coins -= c; L.n++;
       addAnimal(k, true);
       floatText(k, 0.2, 0.2, '+1 ' + ANIMALS[k].a, true);
     } else {
       const lvl = L[w];
       if (lvl >= MAXLVL) return shake(btn);
       const c = workCost(k, w, lvl);
-      if (S.coins < c) return shake(btn);
-      S.coins -= c; L[w]++;
+      if (G.coins < c) return shake(btn);
+      G.coins -= c; L[w]++;
       if (lvl === 0) {
         if (w === 'col') Object.assign(R.col, { x: COUNTER_X, ph: 'toPen', carry: 0 });
         if (w === 'truck') Object.assign(R.truck, { x: TRUCK_OUT, ph: 'away', t: 0.5, load: 0 });
@@ -460,28 +603,29 @@
   function unlockLane(k, btn) {
     ac();
     const u = ANIMALS[k].unlock;
-    if (S.lanes[k - 1].sold < u.need || S.coins < u.cost) return shake(btn);
-    S.coins -= u.cost;
-    S.lanes[k].u = true;
-    renderLanes(); refreshUI(); save();
+    if (G.lanes[k - 1].sold < u.need || G.coins < u.cost) return shake(btn);
+    G.coins -= u.cost;
+    G.lanes[k].u = true;
+    unlockWorlds();
+    renderLanes(); renderMap(); refreshUI(); save();
     celebrate(ANIMALS[k].a, 0, ANIMALS[k].p);
     setTimeout(() => RT[k].el && RT[k].el.sec.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
   }
 
   function buyBuilding(i, t) {
     ac();
-    if (S.b[i]) { tapFx(t); sfx.pop(); return; }
-    const next = S.b.indexOf(false);
-    if (i !== next || S.coins < BUILD[i].cost) return shake(t);
-    S.coins -= BUILD[i].cost; S.b[i] = true;
+    if (G.b[i]) { tapFx(t); sfx.pop(); return; }
+    const next = G.b.indexOf(false);
+    if (i !== next || G.coins < BUILD[i].cost) return shake(t);
+    G.coins -= BUILD[i].cost; G.b[i] = true;
     refreshUI(); save();
-    celebrate(BUILD[i].e, 0, i === 5 ? "Rudra's Farm Company!" : BUILD[i].fx);
+    celebrate(BUILD[i].e, 0, i === 5 ? WD[S.cur].done + '!' : BUILD[i].fx);
     if (i === 5) setTimeout(() => confetti(260), 600);
   }
 
   // ---------- UI refresh (4x per second) ----------
   function setBtn(b, cost, badge, maxed) {
-    const can = !maxed && S.coins >= cost;
+    const can = !maxed && G.coins >= cost;
     b.classList.toggle('max', maxed);
     b.classList.toggle('can', can);
     b.classList.toggle('poor', !maxed && !can);
@@ -493,12 +637,12 @@
 
   let shownCoins = -1, shownStars = -1;
   function refreshUI() {
-    const c = Math.floor(S.coins);
+    const c = Math.floor(G.coins);
     if (c !== shownCoins) { $('#coins').textContent = fmt(c); shownCoins = c; }
     const st = starCount();
     if (st !== shownStars) { $('#stars').textContent = st; shownStars = st; }
 
-    S.lanes.forEach((L, k) => {
+    G.lanes.forEach((L, k) => {
       const E = RT[k].el; if (!E) return;
       E.sold.textContent = fmt(L.sold);
       setBtn(E.btns.n, animalCost(k, L.n), L.n, L.n >= MAX_ANIMALS);
@@ -508,7 +652,7 @@
     // tutorial finger in the chicken lane
     const R0 = RT[0];
     if (R0.el && R0.el.hint) {
-      const P = R0.player, L0 = S.lanes[0];
+      const P = R0.player, L0 = G.lanes[0];
       let where = null;
       if (L0.sold < 15 && !L0.col) {
         if (P.carry > 0) where = [0.81, 0.32];
@@ -519,23 +663,28 @@
     }
 
     if (lockEl) {
-      const k = lockEl._k, u = ANIMALS[k].unlock, sold = S.lanes[k - 1].sold;
+      const k = lockEl._k, u = ANIMALS[k].unlock, sold = G.lanes[k - 1].sold;
       const met = sold >= u.need;
       lockEl.querySelector('.bar i').style.width = Math.min(100, sold / u.need * 100) + '%';
       lockEl.querySelector('.gtxt').textContent = met ? '✅' : `${sold}/${u.need}`;
       lockEl.classList.toggle('ready', met);
-      lockEl.querySelector('.bigbtn').classList.toggle('can', met && S.coins >= u.cost);
+      lockEl.querySelector('.bigbtn').classList.toggle('can', met && G.coins >= u.cost);
     }
 
-    const next = S.b.indexOf(false);
+    const next = G.b.indexOf(false);
     B_EL.forEach((t, i) => {
-      const cls = 'btile ' + (S.b[i] ? 'owned' : i === next ? 'next' + (S.coins >= BUILD[i].cost ? ' can' : '') : 'future');
+      const cls = 'btile ' + (G.b[i] ? 'owned' : i === next ? 'next' + (G.coins >= BUILD[i].cost ? ' can' : '') : 'future');
       if (t._cls !== cls) { t.className = cls; t._cls = cls; }
     });
     const title = $('#farmTitle');
-    const tHtml = S.b[5] ? "👑 <span class=\"gt\">Rudra's Farm Company</span> 👑" : "🌻 Rudra's Farm 🌻";
+    const D = WD[S.cur];
+    const tHtml = G.b[5] ? `👑 <span class="gt">${D.done}</span> 👑` : `${D.t1} ${D.title} ${D.t1}`;
     if (title._h !== tHtml) { title.innerHTML = tHtml; title._h = tHtml; }
-    title.classList.toggle('company', S.b[5]);
+    title.classList.toggle('company', G.b[5]);
+    S.worlds.forEach((g, w) => {
+      const b = mapEl.children[w];
+      if (b && g.u) b.lastChild.textContent = fmt(g.coins);
+    });
   }
 
   // ---------- achievements & celebration ----------
@@ -609,7 +758,8 @@
 
   function showAchievements() {
     ac(); sfx.pop();
-    const tiles = ACH.map(a => `<div class="ach${S.ach[a.id] ? ' got' : ''}"><div class="ae">${a.e}</div><div class="at">${a.t}</div><div class="as">${'⭐'.repeat(a.s)}</div></div>`).join('');
+    const tile = a => `<div class="ach${S.ach[a.id] ? ' got' : ''}"><div class="ae">${a.e}</div><div class="at">${a.t}</div><div class="as">${'⭐'.repeat(a.s)}</div></div>`;
+    const tiles = WD.map((D, w) => `<div class="agroup">${D.icon}</div>` + ACH.filter(a => a.w === w).map(tile).join('')).join('');
     const pct = Math.round(starCount() * 2);
     openModal(`<h2>⭐ ${starCount()}</h2><div class="agrid">${tiles}</div><div class="bonus">⭐ = 💰 +${pct}%</div>`);
   }
@@ -626,64 +776,80 @@
     $('#yesReset').onclick = () => {
       const mute = S.mute;
       S = fresh(); S.mute = mute;
-      RT.forEach(R => Object.assign(R, {
-        player: { x: 0.5, carry: 0, goal: null }, col: { x: COUNTER_X, carry: 0, ph: 'toPen' },
-        truck: { x: TRUCK_OUT, ph: 'away', t: 1, load: 0 }, cashT: 0,
-      }));
-      save(); renderLanes(); refreshUI(); closeModal();
+      bindWorld(); resetRT(); applyTheme();
+      save(); buildFarm(); renderLanes(); renderMap(); shownCoins = -1; refreshUI(); closeModal();
     };
   }
   $('#starBtn').addEventListener('click', showAchievements);
   $('#setBtn').addEventListener('click', showSettings);
 
-  // ---------- offline earnings ----------
-  function laneRate(k) {
-    const L = S.lanes[k];
+  // ---------- offline & background earnings ----------
+  // steady-state income of a fully automated lane (needs a collector plus a cashier or truck)
+  function laneRate(w, k) {
+    const L = S.worlds[w].lanes[k];
     if (!L.u || !L.col) return null;
-    const prod = L.n / prodTime(k);
+    const prod = L.n / prodTime(k, w);
     const colR = colCap(L.col) / (2 * (COUNTER_X - PEN_X) / colSpeed(L.col));
     const cashR = L.cash ? 1 / cashIv(L.cash) : 0;
     const trR = L.truck ? truckCap(L.truck) / (2 * (TRUCK_OUT - TRUCK_STOP) / truckSpeed(L.truck) + 0.7 + truckCd(L.truck)) : 0;
     const flow = Math.min(prod, colR, cashR + trR);
     if (flow <= 0) return null;
     const truckShare = trR / (cashR + trR);
-    return { items: flow, coins: flow * ANIMALS[k].price * mult() * (1 + 0.5 * truckShare) };
+    return { items: flow, coins: flow * WD[w].lanes[k].price * mult(w) * (1 + 0.5 * truckShare) };
+  }
+  // run a world's automation for `secs` without animating it; returns coins earned
+  function simWorld(w, secs, eff) {
+    const g = S.worlds[w];
+    let coins = 0;
+    g.lanes.forEach((L, k) => {
+      if (!L.u) return;
+      const r = laneRate(w, k);
+      if (!r) { L.g = Math.min(penCap(L), L.g + L.n * secs / prodTime(k, w)); return; }
+      coins += r.coins * secs * eff;
+      L.sf = (L.sf || 0) + r.items * secs * eff;
+      const whole = Math.floor(L.sf);
+      L.sf -= whole; L.sold += whole;
+    });
+    g.coins += coins; g.total += coins;
+    return coins;
   }
   function applyOffline() {
     const now = Date.now();
     const away = (now - S.last) / 1000;
     S.last = now;
     if (!(away > 30)) return;
-    const secs = Math.min(away, S.b[2] ? 8 * 3600 : 2 * 3600);
-    const eff = S.b[2] ? 1 : 0.5;
-    let coins = 0;
-    S.lanes.forEach((L, k) => {
-      if (!L.u) return;
-      L.g = Math.min(penCap(L), L.g + L.n * secs / prodTime(k));
-      const r = laneRate(k);
-      if (!r) return;
-      coins += r.coins * secs * eff;
-      L.sold += Math.floor(r.items * secs * eff);
+    const lines = [];
+    let longest = 0;
+    S.worlds.forEach((g, w) => {
+      if (!g.u) return;
+      const secs = Math.min(away, g.b[2] ? 8 * 3600 : 2 * 3600);
+      longest = Math.max(longest, secs);
+      const c = simWorld(w, secs, g.b[2] ? 1 : 0.5);
+      if (c >= 1) lines.push(`<div class="oc">${WD[w].icon} +${fmt(c)} 💰</div>`);
     });
-    if (coins < 1) return;
-    S.coins += coins; S.total += coins;
+    if (!lines.length) return;
     save();
-    const hrs = Math.floor(secs / 3600), mins = Math.floor((secs % 3600) / 60);
+    const hrs = Math.floor(longest / 3600), mins = Math.floor((longest % 3600) / 60);
     openModal(`<div class="offline"><div class="oe">😴🌙</div><div class="ot">⏰ ${hrs ? hrs + 'h ' : ''}${mins}m</div>
-      <div class="oc">+${fmt(coins)} 💰</div><button class="bigbtn" id="okOff">👍</button></div>`);
+      ${lines.join('')}<button class="bigbtn" id="okOff">👍</button></div>`);
     $('#okOff').onclick = () => { ac(); sfx.coin(); flyCoins($('#okOff'), 6); closeModal(); };
   }
 
   // ---------- main loop ----------
-  let lastT = performance.now(), uiT = 0, saveT = 0;
+  let lastT = performance.now(), uiT = 0, saveT = 0, bgT = 0;
   function tick(now) {
     const dt = Math.min(0.1, Math.max(0, (now - lastT) / 1000));
     lastT = now;
-    S.lanes.forEach((L, k) => {
+    G.lanes.forEach((L, k) => {
       if (!L.u || !RT[k].el) return;
       stepLane(k, dt);
       renderLane(k);
     });
+    bgT += dt;
+    if (bgT >= 1) {
+      S.worlds.forEach((g, w) => { if (g.u && w !== S.cur) simWorld(w, bgT, 1); });
+      bgT = 0;
+    }
     uiT += dt; saveT += dt;
     if (uiT > 0.25) { uiT = 0; refreshUI(); checkAch(); }
     if (saveT > 5) { saveT = 0; save(); }
@@ -694,7 +860,7 @@
   // animals wander around their pens
   setInterval(() => {
     RT.forEach((R, k) => {
-      if (!R.el || !S.lanes[k].u) return;
+      if (!R.el || !G.lanes[k].u || WD[S.cur].still) return;
       const herd = R.el.herd.children;
       if (!herd.length) return;
       const a = herd[Math.floor(Math.random() * herd.length)];
@@ -713,9 +879,12 @@
   document.addEventListener('pointerdown', () => ac(), { once: true });
 
   // ---------- start ----------
+  applyTheme();
   buildFarm();
   renderLanes();
-  ACH.forEach(a => { if (!S.ach[a.id] && a.ok()) S.ach[a.id] = Date.now(); }); // no party for old progress
+  renderMap();
+  // no party for old progress, except a newly opened world (worth celebrating on first visit)
+  ACH.forEach(a => { if (!S.ach[a.id] && a.ok() && !/open$/.test(a.id)) S.ach[a.id] = Date.now(); });
   refreshUI();
   applyOffline();
   requestAnimationFrame(tick);
@@ -723,5 +892,5 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
-  window.__farm = { get S() { return S; }, RT, mult, fmt }; // handy for debugging
+  window.__farm = { get S() { return S; }, RT, mult, fmt, goWorld }; // handy for debugging
 })();
