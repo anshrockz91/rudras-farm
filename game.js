@@ -90,7 +90,7 @@
     };
   }
   function fresh() {
-    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, mute: false, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
+    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
   }
   function mergeWorld(w, d) {
     const g = freshWorld(w);
@@ -166,6 +166,7 @@
     } else return base;
     base.ach = d.ach || {};
     base.mute = !!d.mute;
+    base.silly = d.silly !== false;
     base.rev = d.rev | 0;
     base.pend = !!d.pend;
     if (d.last) base.last = d.last;
@@ -282,35 +283,187 @@
   }
   resetRT();
 
-  // ---------- sound ----------
-  let AC = null;
+  // ---------- sound (everything is synthesised; no audio files) ----------
+  let AC = null, OUT = null, NOISE = null, voiceGain = 1;
   function ac() {
-    if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; } }
+    if (!AC) {
+      try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; }
+      OUT = AC.createDynamicsCompressor(); // keeps stacked sounds from clipping
+      OUT.connect(AC.destination);
+    }
     if (AC.state === 'suspended') AC.resume();
     return AC;
   }
-  function tone(f, d = 0.12, type = 'sine', v = 0.2, f2 = null, delay = 0) {
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+  // schedule a value path [[fraction of dur, value], ...] on an AudioParam
+  function path(param, pts, t, dur, linear) {
+    pts.forEach(([at, v], i) => {
+      if (!i) param.setValueAtTime(v, t);
+      else if (linear) param.linearRampToValueAtTime(v, t + at * dur);
+      else param.exponentialRampToValueAtTime(Math.max(v, 1), t + at * dur);
+    });
+  }
+  function envelope(a, t, dur, vol) {
+    const g = a.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    vol = Math.min(0.9, vol * voiceGain);
+    g.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.025, dur / 4));
+    g.gain.setValueAtTime(vol, t + dur * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    return g;
+  }
+  function lfo(a, t, dur, rate, depth, target) {
+    const l = a.createOscillator(), lg = a.createGain();
+    l.frequency.value = rate; lg.gain.value = depth;
+    l.connect(lg).connect(target);
+    l.start(t); l.stop(t + dur + 0.05);
+  }
+  // one oscillator voice: pitch path, vibrato, filter sweep, tremolo ("brrrt")
+  function voice({ type = 'sawtooth', f, dur, vol = 0.25, vib = 0, vibRate = 6, filt = null, ff = [[0, 1000]], q = 1, am = 0, amRate = 30, delay = 0 }) {
     if (S.mute) return;
     const a = ac(); if (!a) return;
     const t = a.currentTime + delay;
-    const o = a.createOscillator(), g = a.createGain();
+    const o = a.createOscillator();
     o.type = type;
-    o.frequency.setValueAtTime(f, t);
-    if (f2) o.frequency.exponentialRampToValueAtTime(f2, t + d);
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(v, t + 0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + d);
-    o.connect(g).connect(a.destination);
-    o.start(t); o.stop(t + d + 0.03);
+    path(o.frequency, f, t, dur);
+    if (vib) lfo(a, t, dur, vibRate, vib, o.frequency);
+    let node = o;
+    if (filt) {
+      const bq = a.createBiquadFilter();
+      bq.type = filt; bq.Q.value = q;
+      path(bq.frequency, ff, t, dur, true);
+      node.connect(bq); node = bq;
+    }
+    const g = envelope(a, t, dur, vol);
+    node.connect(g); node = g;
+    if (am) {
+      const tg = a.createGain();
+      tg.gain.value = 1 - am;
+      lfo(a, t, dur, amRate, am, tg.gain);
+      node.connect(tg); node = tg;
+    }
+    node.connect(OUT);
+    o.start(t); o.stop(t + dur + 0.05);
   }
+  function noise({ dur, vol = 0.2, filt = 'bandpass', ff = [[0, 1000]], q = 1, delay = 0 }) {
+    if (S.mute) return;
+    const a = ac(); if (!a) return;
+    if (!NOISE) {
+      NOISE = a.createBuffer(1, a.sampleRate, a.sampleRate);
+      const d = NOISE.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const t = a.currentTime + delay;
+    const n = a.createBufferSource();
+    n.buffer = NOISE; n.loop = true;
+    const bq = a.createBiquadFilter();
+    bq.type = filt; bq.Q.value = q;
+    path(bq.frequency, ff, t, dur, true);
+    n.connect(bq).connect(envelope(a, t, dur, vol)).connect(OUT);
+    n.start(t); n.stop(t + dur + 0.05);
+  }
+  function tone(f, d = 0.12, type = 'sine', v = 0.2, f2 = null, delay = 0) {
+    voice({ type, f: f2 ? [[0, f], [1, f2]] : [[0, f], [1, f]], dur: d, vol: v, delay });
+  }
+
+  // --- farts (the star of the show)
+  function fartOne(base, dur, delay = 0, wob = 1) {
+    voice({ type: 'sawtooth', f: [[0, base * 1.35], [0.3, base], [1, base * 0.6]], dur, vol: 0.5, delay,
+      vib: base * 0.3 * wob, vibRate: rnd(14, 28), filt: 'lowpass', ff: [[0, 900], [1, 280]], q: 2, am: 0.65, amRate: rnd(24, 46) });
+    noise({ dur, vol: 0.1, ff: [[0, base * 4], [1, base * 2]], q: 2, delay });
+  }
+  function fart(kind) {
+    kind = kind || pick(['classic', 'squeaky', 'long', 'triple', 'wet', 'classic']);
+    if (kind === 'squeaky') return fartOne(rnd(170, 270), rnd(0.25, 0.45), 0, 0.6);
+    if (kind === 'long') return fartOne(rnd(45, 62), rnd(0.9, 1.3), 0, 1.2);
+    if (kind === 'triple') return [0, 0.17, 0.32].forEach((d, i) => fartOne(rnd(70, 100) * (1 + i * 0.18), rnd(0.11, 0.16), d));
+    if (kind === 'wet') { fartOne(rnd(58, 78), rnd(0.35, 0.5)); noise({ dur: 0.45, vol: 0.14, filt: 'lowpass', ff: [[0, 1300], [1, 250]] }); return; }
+    fartOne(rnd(70, 100), rnd(0.35, 0.6));
+  }
+
+  // --- animal and machine voices, one per lane
+  const VOICES = {
+    cluck: () => {
+      [0, 0.11, 0.2].forEach(d => voice({ type: 'square', f: [[0, 620], [1, 460]], dur: 0.07, vol: 0.16, filt: 'bandpass', ff: [[0, 1300]], q: 3, delay: d }));
+      voice({ f: [[0, 520], [0.3, 950], [1, 600]], dur: 0.28, vol: 0.22, filt: 'bandpass', ff: [[0, 1500]], q: 2, delay: 0.32 });
+    },
+    moo: () => voice({ f: [[0, 115], [0.3, 150], [1, 100]], dur: 1.0, vol: 0.4, vib: 3, vibRate: 5, filt: 'lowpass', ff: [[0, 250], [0.3, 950], [1, 330]], q: 5 }),
+    baa: () => voice({ f: [[0, 430], [1, 350]], dur: 0.75, vol: 0.3, vib: 32, vibRate: 9, filt: 'bandpass', ff: [[0, 900], [0.2, 1600], [1, 1100]], q: 3 }),
+    oink: () => {
+      [0, 0.2].forEach(d => voice({ type: 'square', f: [[0, 260], [0.4, 430], [1, 210]], dur: 0.15, vol: 0.28, filt: 'bandpass', ff: [[0, 1400]], q: 6, delay: d }));
+      noise({ dur: 0.12, vol: 0.12, ff: [[0, 700]], q: 3, delay: 0.4 });
+    },
+    buzz: () => voice({ f: [[0, 210], [0.5, 245], [1, 200]], dur: 0.9, vol: 0.18, vib: 20, vibRate: 3, filt: 'bandpass', ff: [[0, 650]], q: 2, am: 0.7, amRate: 48 }),
+    neigh: () => voice({ f: [[0, 700], [0.2, 1150], [1, 480]], dur: 0.95, vol: 0.24, vib: 130, vibRate: 13, filt: 'bandpass', ff: [[0, 1600], [1, 900]], q: 2 }),
+    woof: () => [0, 0.22].forEach(d => {
+      noise({ dur: 0.1, vol: 0.25, filt: 'lowpass', ff: [[0, 900]], delay: d });
+      voice({ f: [[0, 270], [1, 140]], dur: 0.15, vol: 0.38, filt: 'lowpass', ff: [[0, 800]], q: 2, delay: d });
+    }),
+    meow: () => voice({ f: [[0, 460], [0.35, 760], [1, 420]], dur: 0.75, vol: 0.3, vib: 8, vibRate: 6, filt: 'bandpass', ff: [[0, 500], [0.35, 1900], [1, 700]], q: 5 }),
+    hop: () => [0, 0.17].forEach(d => voice({ type: 'sine', f: [[0, 260], [1, 950]], dur: 0.13, vol: 0.3, delay: d })),
+    squeak: () => [0, 0.12, 0.24].forEach(d => voice({ type: 'sine', f: [[0, 1800], [0.5, 2600], [1, 2000]], dur: 0.09, vol: 0.18, delay: d })),
+    bloop: () => [[0, 520, 150], [0.3, 380, 100]].forEach(([d, a, b]) => voice({ type: 'sine', f: [[0, a], [1, b]], dur: 0.25, vol: 0.35, delay: d })),
+    squawk: () => [0, 0.3].forEach(d => voice({ f: [[0, 1100], [0.5, 1450], [1, 900]], dur: 0.25, vol: 0.2, vib: 220, vibRate: 28, filt: 'bandpass', ff: [[0, 2000]], q: 3, delay: d })),
+    chomp: () => [0, 0.26].forEach(d => {
+      noise({ dur: 0.07, vol: 0.45, ff: [[0, 350]], q: 2, delay: d });
+      voice({ type: 'square', f: [[0, 95], [1, 55]], dur: 0.1, vol: 0.3, filt: 'lowpass', ff: [[0, 600]], delay: d });
+    }),
+    munch: () => [0, 0.09, 0.2, 0.28, 0.4].forEach(d => noise({ dur: 0.045, vol: 0.3, ff: [[0, rnd(1800, 3200)]], q: 1.5, delay: d })),
+    boing: () => voice({ type: 'sine', f: [[0, 110], [0.4, 520], [1, 330]], dur: 0.55, vol: 0.35, vib: 70, vibRate: 18 }),
+    roar: () => {
+      voice({ f: [[0, 85], [0.3, 150], [1, 65]], dur: 1.1, vol: 0.45, am: 0.5, amRate: 32, filt: 'lowpass', ff: [[0, 400], [0.3, 1500], [1, 300]], q: 3 });
+      noise({ dur: 1.0, vol: 0.18, filt: 'lowpass', ff: [[0, 900], [1, 200]] });
+    },
+    trumpet: () => voice({ f: [[0, 340], [0.15, 720], [0.8, 660], [1, 400]], dur: 0.95, vol: 0.34, vib: 26, vibRate: 7, filt: 'bandpass', ff: [[0, 900], [0.2, 1900], [1, 1000]], q: 4 }),
+    chop: () => [0, 0.2].forEach(d => {
+      noise({ dur: 0.08, vol: 0.45, filt: 'lowpass', ff: [[0, 600]], delay: d });
+      voice({ type: 'sine', f: [[0, 190], [1, 80]], dur: 0.13, vol: 0.4, delay: d });
+    }),
+    clack: () => [0, 0.15].forEach(d => {
+      noise({ dur: 0.05, vol: 0.35, ff: [[0, 2300]], q: 4, delay: d });
+      voice({ type: 'square', f: [[0, 900], [1, 650]], dur: 0.05, vol: 0.12, delay: d });
+    }),
+    whoosh: () => noise({ dur: 0.65, vol: 0.3, ff: [[0, 300], [1, 2600]], q: 1.2 }),
+    clank: () => [[0, 620], [0.01, 935], [0.25, 700]].forEach(([d, f]) => voice({ type: 'square', f: [[0, f], [1, f * 0.98]], dur: 0.3, vol: 0.12, filt: 'bandpass', ff: [[0, f * 3]], q: 10, delay: d })),
+    zap: () => { voice({ f: [[0, 2500], [1, 70]], dur: 0.28, vol: 0.2 }); noise({ dur: 0.2, vol: 0.12, filt: 'highpass', ff: [[0, 3000]] }); },
+    ting: () => [0, 0.22].forEach(d => { tone(2100, 0.4, 'sine', 0.22, null, d); tone(3150, 0.25, 'triangle', 0.08, null, d); }),
+  };
+  const LANE_VOICES = [
+    ['cluck', 'moo', 'baa', 'oink', 'buzz', 'neigh'],
+    ['woof', 'meow', 'hop', 'squeak', 'bloop', 'squawk'],
+    ['chomp', 'munch', 'boing', 'roar', 'roar', 'trumpet'],
+    ['chop', 'clack', 'whoosh', 'clank', 'zap', 'ting'],
+  ];
+  const VOICE_GAIN = { cluck: 3, baa: 3, oink: 4, buzz: 3.5, neigh: 2.5, meow: 3.5, squawk: 4, munch: 2, trumpet: 3, clack: 1.6, whoosh: 2, clank: 3.5, squeak: 1.8 };
+  const lastVoice = {};
+  function laneVoice(k, force) {
+    if (S.mute) return;
+    const now = performance.now();
+    if (!force && now - (lastVoice[k] || 0) < 600) return; // don't spam when tapping fast
+    lastVoice[k] = now;
+    const name = LANE_VOICES[S.cur][k];
+    voiceGain = VOICE_GAIN[name] || 1; // filtered voices lose energy; even out loudness
+    VOICES[name]();
+    voiceGain = 1;
+  }
+
   let lastTiny = 0;
   const sfx = {
     pop: () => tone(480, 0.12, 'sine', 0.3, 950),
     coin: () => { tone(988, 0.09, 'square', 0.07); tone(1319, 0.22, 'square', 0.07, null, 0.08); },
     tiny: () => { const n = performance.now(); if (n - lastTiny < 140) return; lastTiny = n; tone(1568, 0.06, 'triangle', 0.06); },
     buy: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.14, 'triangle', 0.2, null, i * 0.07)),
-    nope: () => tone(240, 0.18, 'sawtooth', 0.07, 150),
-    honk: () => { tone(392, 0.12, 'square', 0.06); tone(392, 0.14, 'square', 0.06, null, 0.17); },
+    nope: () => (S.silly ? fart() : tone(240, 0.18, 'sawtooth', 0.07, 150)),
+    honk: () => {
+      if (!S.silly) { tone(392, 0.12, 'square', 0.06); tone(392, 0.14, 'square', 0.06, null, 0.17); return; }
+      [0, 0.55].forEach(d => voice({ type: 'square', f: [[0, 210], [0.45, 330], [1, 345]], dur: 0.48, vol: 0.18, filt: 'lowpass', ff: [[0, 1500]], q: 3, delay: d })); // AH-OOGA
+    },
+    burp: () => voice({ f: [[0, 95], [0.5, 78], [1, 58]], dur: 0.6, vol: 0.42, am: 0.5, amRate: 21, filt: 'lowpass', ff: [[0, 520], [1, 240]], q: 6 }),
+    boing: () => VOICES.boing(),
+    slideUp: () => voice({ type: 'triangle', f: [[0, 320], [1, 1500]], dur: 0.42, vol: 0.22, vib: 12, vibRate: 7 }),
+    yippee: () => [0, 0.1, 0.2].forEach((d, i) => voice({ type: 'triangle', f: [[0, 700 + i * 200], [1, 1300 + i * 250]], dur: 0.09, vol: 0.22, delay: d })),
+    partyHorn: () => voice({ f: [[0, 380], [0.12, 820], [1, 790]], dur: 0.65, vol: 0.55, vib: 9, vibRate: 11, filt: 'bandpass', ff: [[0, 1500]], q: 2 }),
     fanfare: () => [[523, 0], [659, .12], [784, .24], [1047, .38], [784, .55], [1047, .68]].forEach(([f, d]) => {
       tone(f, 0.28, 'triangle', 0.2, null, d); tone(f / 2, 0.28, 'sine', 0.12, null, d);
     }),
@@ -352,7 +505,16 @@
       anim.onfinish = () => { c.remove(); pill.classList.remove('bump'); void pill.offsetWidth; pill.classList.add('bump'); };
     }
   }
-  function shake(e) { e.classList.remove('shake'); void e.offsetWidth; e.classList.add('shake'); sfx.nope(); }
+  function puff(target) {
+    if (!S.silly || !target) return;
+    const r = target.getBoundingClientRect();
+    const p = el('div', 'puff', '💨');
+    p.style.left = (r.left + r.width * 0.5) + 'px';
+    p.style.top = (r.top + r.height * 0.4) + 'px';
+    document.body.appendChild(p);
+    setTimeout(() => p.remove(), 1000);
+  }
+  function shake(e) { e.classList.remove('shake'); void e.offsetWidth; e.classList.add('shake'); sfx.nope(); puff(e); }
   function tapFx(e) { e.classList.add('tapped'); setTimeout(() => e.classList.remove('tapped'), 110); }
 
   // ---------- earning ----------
@@ -367,6 +529,10 @@
   function tapPen(k) {
     ac(); buzz(8); tapFx(RT[k].el.pen);
     RT[k].player.goal = 'pen';
+  }
+  function animalTap(k, an) {
+    an.classList.remove('jump'); void an.offsetWidth; an.classList.add('jump');
+    if (S.silly && Math.random() < 0.25) { fart(); puff(an); } else laneVoice(k, true);
   }
   function tapCounter(k) {
     ac(); buzz(8); tapFx(RT[k].el.counter);
@@ -437,6 +603,7 @@
         if (T.t <= 0) T.ph = 'out';
       } else if (T.ph === 'out' && move(T, TRUCK_OUT, sp, dt)) {
         if (T.load > 0) {
+          if (S.silly && T.load >= truckCap(L.truck) && Math.random() < 0.4) sfx.burp();
           const v = earn(k, T.load, 1.5);
           G.stats.del++; sfx.coin();
           floatText(k, 0.86, 0.6, '🚚 +' + fmt(v) + ' 💰', true);
@@ -554,7 +721,11 @@
       R.el.btns[b.dataset.w] = b;
       b.addEventListener('click', () => buy(k, b.dataset.w, b));
     });
-    R.el.pen.addEventListener('click', () => tapPen(k));
+    R.el.pen.addEventListener('click', e => {
+      const an = e.target.closest('.animal');
+      if (an) animalTap(k, an); else laneVoice(k);
+      tapPen(k);
+    });
     R.el.counter.addEventListener('click', () => tapCounter(k));
     for (let i = 0; i < L.n; i++) addAnimal(k, false);
     setVisibility(k);
@@ -639,6 +810,7 @@
       G.coins -= c; L.n++;
       addAnimal(k, true);
       floatText(k, 0.2, 0.2, '+1 ' + ANIMALS[k].a, true);
+      sfx.boing(); setTimeout(() => laneVoice(k, true), 350);
     } else {
       const lvl = L[w];
       if (lvl >= MAXLVL) return shake(btn);
@@ -652,8 +824,9 @@
       }
       const at = w === 'col' ? [R.col.x, 0.55] : w === 'cash' ? [0.815, 0.2] : [Math.min(R.truck.x, 0.9), 0.6];
       floatText(k, at[0], at[1], lvl === 0 ? '🎉' : '⬆️', true);
+      if (lvl === 0) sfx.yippee(); else sfx.slideUp();
     }
-    sfx.buy(); buzz(20);
+    buzz(20);
     refreshUI(); save();
   }
 
@@ -666,6 +839,7 @@
     unlockWorlds();
     renderLanes(); renderMap(); refreshUI(); save();
     celebrate(ANIMALS[k].a, 0, ANIMALS[k].p);
+    setTimeout(() => { if (S.silly) sfx.partyHorn(); laneVoice(k, true); }, 900);
     setTimeout(() => RT[k].el && RT[k].el.sec.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
   }
 
@@ -824,10 +998,15 @@
     ac(); sfx.pop();
     openModal(`<h2>⚙️</h2>
       <div class="setrow"><button class="bigbtn" id="muteBtn">${S.mute ? '🔇' : '🔊'}</button>
+      <button class="bigbtn" id="sillyBtn">${S.silly ? '💨 ✅' : '💨 ❌'}</button>
       <button class="bigbtn danger" id="resetBtn">🔄</button></div>
       <div class="setrow hidden" id="confirmRow"><span style="font-size:40px">🔄❓</span>
       <button class="bigbtn danger" id="yesReset">✅</button><button class="bigbtn" id="noReset">❌</button></div>`);
     $('#muteBtn').onclick = () => { S.mute = !S.mute; $('#muteBtn').textContent = S.mute ? '🔇' : '🔊'; save(); sfx.pop(); };
+    $('#sillyBtn').onclick = () => {
+      S.silly = !S.silly; $('#sillyBtn').textContent = S.silly ? '💨 ✅' : '💨 ❌'; save();
+      if (S.silly) fart('triple'); else sfx.pop();
+    };
     $('#resetBtn').onclick = () => $('#confirmRow').classList.remove('hidden');
     $('#noReset').onclick = () => $('#confirmRow').classList.add('hidden');
     $('#yesReset').onclick = () => {
@@ -839,6 +1018,7 @@
   $('#starBtn').addEventListener('click', showAchievements);
   $('#setBtn').addEventListener('click', showSettings);
   $('#profBtn').addEventListener('click', () => showProfile());
+  $('#coinPill').addEventListener('click', () => { ac(); sfx.coin(); });
 
   // ---------- offline & background earnings ----------
   // steady-state income of a fully automated lane (needs a collector plus a cashier or truck)
@@ -1124,5 +1304,7 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
-  window.__farm = { get S() { return S; }, get PR() { return PR; }, RT, mult, fmt, goWorld, sync }; // handy for debugging
+  window.__farm = { get S() { return S; }, get PR() { return PR; }, RT, mult, fmt, goWorld, sync,
+    // test hook: render sounds into an OfflineAudioContext
+    audio: { VOICES, fart, sfx, voice(n) { voiceGain = VOICE_GAIN[n] || 1; VOICES[n](); voiceGain = 1; }, useContext(ctx) { AC = ctx; OUT = ctx.destination; NOISE = null; } } }; // handy for debugging
 })();
