@@ -928,3 +928,7 @@ main { padding-bottom: 0; }
 .isomap .dsky .cloud { animation-name: idrift; }
 @keyframes idrift { from { transform: translateX(-260px); } to { transform: translateX(var(--skyW, 1150px)); } }
 #mapview.night .isp:not(.ianimal) { filter: brightness(.85); }
+
+.ianim { position: absolute; pointer-events: none; background-repeat: no-repeat; background-position: 0 0; animation: ianim 1s steps(var(--frames, 6)) infinite; }
+@keyframes ianim { to { background-position: calc(var(--fw) * var(--frames, 6) * -1) 0; } }
+.isp.ianimal.swim { animation-duration: 1.4s; }
