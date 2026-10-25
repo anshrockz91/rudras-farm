@@ -145,14 +145,28 @@
       ask: 'I’m Super Rudra! You helped everyone in town. One last thing: build the golden statue!',
       thanks: 'You’re the real superhero! Hooray!' },
   ];
+  // living-city lines: rescues, visitors, new places
+  const CITY = {
+    r_fire: { who: 'woof', text: 'Woof! The fire is out! The Rescue Crew is always ready!' },
+    r_jam: { who: 'whiskers', text: 'Meow! Traffic is moving again. Drive safely, everyone!' },
+    r_hurt: { who: 'hoot', text: 'Hoo hoo! All better now. Off I fly!' },
+    v_icecream: { who: 'tom', text: 'Ding ding! Free ice cream for our hero!' },
+    v_unicorn: { who: 'lily', text: 'Look! A real unicorn! Quick, make a wish!' },
+    v_super: { who: 'super', text: 'Up, up and away! Keep up the great work, {hero}!' },
+    v_dragon: { who: 'bolt', text: 'Beep boop. A friendly dragon. It brought shiny gold coins!' },
+    o_garage: { who: 'leo', text: 'Wheels! A garage just opened! Pick a ride and zoom around town!' },
+    o_food: { who: 'pablo', text: 'Mamma mia! Food Street is open! Build restaurants and collect the tips!' },
+    o_eat: { who: 'pablo', text: 'Delizioso! A new restaurant! Look at all the hungry customers!' },
+  };
   // every spoken line, with the audio file it lives in
   const LINES = [
     { file: 'intro', who: INTRO.who, text: INTRO.text },
     ...CHAPTERS.map((c, i) => ({ file: 'ch' + i, who: c.who, text: c.text })),
     ...QUESTS.flatMap(q => [{ file: q.id + 'a', who: q.who, text: q.ask }, { file: q.id + 'b', who: q.who, text: q.thanks }]),
     { file: 'finale', who: FINALE.who, text: FINALE.text },
+    ...Object.entries(CITY).map(([file, l]) => ({ file, who: l.who, text: l.text })),
   ];
-  const STORY = { PEOPLE, INTRO, CHAPTERS, FINALE, QUESTS, LINES };
+  const STORY = { PEOPLE, INTRO, CHAPTERS, FINALE, QUESTS, CITY, LINES };
   if (typeof module !== 'undefined' && module.exports) module.exports = STORY;
   else window.STORY = STORY;
 })();

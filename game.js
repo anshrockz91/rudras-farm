@@ -114,6 +114,7 @@
   const DEFAULT_TASKS = ['🧸 Tidy up your play area', '🍎 Eat a healthy snack', '💧 Drink a glass of water', '📚 Read a book for 10 minutes', '🤸 Do 10 jumping jacks'];
   const parentDefaults = () => ({ pin: null, salt: '', ti: 0, timer: { on: false, minutes: 15, daily: 0, tasks: DEFAULT_TASKS.slice() } });
   const storyDefaults = () => ({ q: 0, done: {}, intro: false, finale: false });
+  const cityDefaults = () => ({ cars: {}, ride: '', food: {}, visitors: {}, rescues: 0, hi: {} });
   const playDefaults = () => ({ used: 0, day: '', dayUsed: 0, extra: 0, warned: false, lock: null });
   function freshWorld(w) {
     return {
@@ -123,7 +124,7 @@
     };
   }
   function fresh() {
-    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, parent: parentDefaults(), play: playDefaults(), story: storyDefaults(), mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
+    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, parent: parentDefaults(), play: playDefaults(), story: storyDefaults(), city: cityDefaults(), mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
   }
   function mergeWorld(w, d) {
     const g = freshWorld(w);
@@ -207,6 +208,7 @@
     base.parent.timer = Object.assign(parentDefaults().timer, (d.parent || {}).timer || {});
     base.play = Object.assign(playDefaults(), d.play || {});
     base.story = Object.assign(storyDefaults(), d.story || {});
+    base.city = Object.assign(cityDefaults(), d.city || {});
     base.rev = d.rev | 0;
     base.pend = !!d.pend;
     if (d.last) base.last = d.last;
@@ -279,6 +281,10 @@
     ACH.push({ w, id: `w${w}done`, e: D.build[5].e, t: '👑', s: 5, ok: () => g().b[5] });
   }
 
+  ACH.push({ w: WD.length, id: 'rescue5', e: '🚒', t: '5', s: 3, ok: () => (S.city.rescues || 0) >= 5 });
+  ACH.push({ w: WD.length, id: 'visitors3', e: '🦄', t: '3', s: 3, ok: () => Object.keys(S.city.visitors).length >= 3 });
+  ACH.push({ w: WD.length, id: 'ride_super', e: '🏎️', t: '', s: 3, ok: () => !!S.city.cars.supercar });
+  ACH.push({ w: WD.length, id: 'food6', e: '🍽️', t: '6', s: 5, ok: () => Object.keys(S.city.food).length >= 6 });
   WONDERS.forEach(x => ACH.push({ w: WD.length, id: 'wonder_' + x.id, e: x.e, t: '🗺️', s: 5, ok: () => !!S.wonders[x.id] }));
 
   // ---------- formulas ----------
@@ -603,9 +609,9 @@
     const P = R.player; P.moving = false;
     if (P.goal) {
       const atPen = P.goal === 'pen';
-      if (move(P, atPen ? PEN_X : COUNTER_X, PLAYER_SPEED, dt)) {
+      if (move(P, atPen ? PEN_X : COUNTER_X, playerSpeed(), dt)) {
         if (atPen) {
-          const take = Math.min(Math.floor(L.g), PLAYER_CAP - P.carry);
+          const take = Math.min(Math.floor(L.g), playerCap() - P.carry);
           if (take > 0) { L.g -= take; P.carry += take; sfx.pop(); floatText(k, PEN_X, 0.32, '+' + take + ' ' + A.p); }
         } else {
           L.st += P.carry; P.carry = 0;
@@ -768,7 +774,7 @@
         <div class="counter"><div class="awning"></div><div class="cashier"><span class="hat"></span>${WORK.cash.e}</div><div class="table"><div class="pile"></div><b class="stock"></b></div></div>
         <div class="actor truck"><span class="flip"><span class="body">${WORK.truck.e}</span></span><div class="carry"></div></div>
         <div class="actor col"><span class="flip"><span class="body">${WORK.col.e}</span><span class="ride"></span></span><span class="hat"></span><div class="carry"></div></div>
-        <div class="actor player"><span class="flip"><span class="body">${curProfile().av}</span></span><div class="carry"></div></div>
+        <div class="actor player"><span class="flip"><span class="body">${curProfile().av}</span><span class="ride">${rideEmoji()}</span></span><div class="carry"></div></div>
         ${k === 0 ? '<div class="hint">👆</div>' : ''}
       </div>
       <div class="workers">${btn('n', A.a)}${btn('col', WORK.col.e)}${btn('cash', WORK.cash.e)}${btn('truck', WORK.truck.e)}</div>`;
@@ -1056,17 +1062,26 @@
 
   // ---------- the city map ----------
   const DISTRICTS = ['Farm Fields', 'Pet Street', 'Zoo Park', 'Builder Yard', 'Space Port'];
-  const CITY_ORDER = [4, 3, 2, 'square', 1, 0]; // top to bottom: the town grows up the map
+  const CITY_ORDER = [4, 3, 2, 'square', 'food', 1, 'garage', 0]; // top to bottom: the town grows up the map
   function cityCars(seed) {
     const done = Object.keys(S.story.done).length;
     if (!done) return '';
     const pool = ['🚗', '🚕', '🚙', '🚌', '🛵', '🚲'];
+    if (S.story.done.q11) pool.push('🚒');
+    if (S.story.done.q20) pool.push('🚓');
     S.worlds.forEach((g, w) => { if (g.u) pool.push(VEH[w][Math.min(2, tierOf(Math.max(...g.lanes.map(L => L.truck))))]); });
     const n = Math.min(4, 1 + Math.floor(done / 6));
     let html = '';
     for (let i = 0; i < n; i++) {
       const dur = 7 + ((i * 37 + seed * 13) % 9), back = (i + seed) % 2;
       html += `<span class="car${back ? ' back' : ''}" style="animation-duration:${dur}s;animation-delay:-${(i * 2.3 + seed * 3.1) % dur}s"><span>${pool[(i * 5 + seed * 3 + done) % pool.length]}</span></span>`;
+    }
+    // people on the pavement
+    const folk = ['🚶', '🚶‍♀️', '🏃‍♀️', '🚶‍♂️', '👫', '🧍'].concat(Object.keys(PEOPLE).filter(personHelped).map(id => PEOPLE[id].job));
+    const np = Math.min(5, Math.ceil(done / 5));
+    for (let i = 0; i < np; i++) {
+      const dur = 14 + ((i * 29 + seed * 7) % 12);
+      html += `<span class="ped${(i + seed) % 2 ? ' back' : ''}" style="animation-duration:${dur}s;animation-delay:-${(i * 4.1 + seed * 2.7) % dur}s"><span>${folk[(i * 7 + seed * 5) % folk.length]}</span></span>`;
     }
     return html;
   }
@@ -1077,6 +1092,8 @@
     let roadN = 0;
     const road = () => `<div class="croad${lights ? ' lit' : ''}">${cityCars(roadN++)}</div>`;
     const blocks = CITY_ORDER.map(d => {
+      if (d === 'garage') return garageBlock();
+      if (d === 'food') return foodBlock();
       if (d === 'square') {
         const walkers = Object.keys(PEOPLE).filter(id => personHelped(id)).slice(0, 10)
           .map((id, i) => `<span class="walker" style="animation-duration:${9 + (i % 4) * 3}s;animation-delay:-${i * 1.7}s;top:${58 + (i % 3) * 12}%">${PEOPLE[id].job}</span>`).join('');
@@ -1106,8 +1123,9 @@
       </section>`;
     });
     box.style.setProperty('--sat', (0.3 + 0.7 * done / total).toFixed(2));
-    box.innerHTML = `<div class="sign${S.story.finale ? ' gold' : ''}">${S.story.finale ? '✨' : '💤'} ${esc(townName())} ${S.story.finale ? '✨' : '💤'}<small>😊 ${done}/${total}</small></div>`
-      + blocks.join(road());
+    const fly = (S.story.done.q24 ? '<div class="flyover">🚁</div>' : '') + (S.story.done.q30 ? '<div class="flyover hero">🦸</div>' : '');
+    box.innerHTML = `<div class="sign${S.story.finale ? ' gold' : ''}"><span class="skyicon">☀️</span> ${esc(townName())} <span class="skyicon2">${S.story.finale ? '✨' : '💤'}</span><small>😊 ${done}/${total}</small></div>`
+      + blocks.join(road()) + fly + '<div class="nightveil"><span>✨</span><span>⭐</span><span>✨</span><span>🌙</span><span>⭐</span></div>';
     box.querySelectorAll('.dgo').forEach(b => b.addEventListener('click', () => goWorld(+b.dataset.w)));
     box.querySelectorAll('.landmark').forEach(b => b.addEventListener('click', () => showWonder(WONDERS.find(x => x.id === b.dataset.x))));
     box.querySelectorAll('.hall').forEach(b => b.addEventListener('click', () => {
@@ -1122,6 +1140,263 @@
       else { sfx.pop(); toast('💤'); }
     }));
     box.querySelectorAll('.dist.locked').forEach(b => b.addEventListener('click', () => shake(b)));
+    box.querySelectorAll('.rideb').forEach(b => b.addEventListener('click', () => tapRide(b.dataset.r, b)));
+    box.querySelectorAll('.eat').forEach(b => b.addEventListener('click', () => tapFood(b.dataset.f, b)));
+    attachCityThings(); dayNight(); updateTips();
+    if (!talking && view === 'city') cityHellos();
+  }
+
+
+  // ---------- living city: garage, food street, rescues, visitors, day & night ----------
+  // City things are paid for (and pay out) in Farm coins: the farm is the town bank.
+  const BANK = 0;
+  const RIDES = [
+    { id: 'bike', e: '🚲', n: 'Bike', cost: 50 },
+    { id: 'scooter', e: '🛴', n: 'Scooter', cost: 500 },
+    { id: 'moped', e: '🛵', n: 'Moped', cost: 5000 },
+    { id: 'motorbike', e: '🏍️', n: 'Motorbike', cost: 50000 },
+    { id: 'car', e: '🚗', n: 'Car', cost: 300000 },
+    { id: 'jeep', e: '🚙', n: 'Jeep', cost: 2e6 },
+    { id: 'camper', e: '🚐', n: 'Camper', cost: 1e7 },
+    { id: 'supercar', e: '🏎️', n: 'Super Car', cost: 6e7 },
+    { id: 'heli', e: '🚁', n: 'Helicopter', cost: 4e8, world: 3 },
+    { id: 'ufo', e: '🛸', n: 'UFO', cost: 3e9, world: 4 },
+  ];
+  const FOOD = [
+    { id: 'burger', e: '🍔', n: 'Burger Bots', cost: 2000 },
+    { id: 'taco', e: '🌮', n: 'Taco Rocket', cost: 20000 },
+    { id: 'noodle', e: '🍜', n: 'Noodle Moon', cost: 200000 },
+    { id: 'sushi', e: '🍣', n: 'Sushi Sub', cost: 2e6 },
+    { id: 'curry', e: '🍛', n: 'Curry Cloud', cost: 2e7 },
+    { id: 'pancake', e: '🥞', n: 'Pancake Hill', cost: 2e8 },
+  ];
+  const TIP_PAYBACK = 300; // a restaurant earns its price back in about 5 minutes of tips
+  const TIP_CAP = 600;     // tips stop piling up after 10 minutes until collected
+  const rideRank = () => { const i = RIDES.findIndex(r => r.id === S.city.ride); return i < 0 ? 0 : i + 1; };
+  const playerSpeed = () => PLAYER_SPEED * (1 + 0.12 * rideRank());
+  const playerCap = () => PLAYER_CAP + 5 * rideRank();
+  const rideEmoji = () => { const r = RIDES.find(x => x.id === S.city.ride); return r ? r.e : ''; };
+  const garageOpen = () => !!S.story.done.q2;
+  const foodOpen = () => !!S.story.done.q6;
+  // a fair reward that grows with the farm: about `sec` seconds of farm income
+  function townReward(sec) {
+    let rate = 0;
+    for (let k = 0; k < 6; k++) { const r = laneRate(BANK, k); if (r) rate += r.coins; }
+    return Math.max(25, Math.round(rate * sec));
+  }
+  function payBank(amount) { const g = S.worlds[BANK]; g.coins += amount; g.total += amount; S.pend = true; }
+
+  // short spoken pop-up (no buttons) for quick moments like rescues and visitors
+  function quip(file, after) {
+    const L = window.STORY.CITY[file], P = PEOPLE[L.who];
+    const q = el('div', 'quip', `<span class="qf">${face(L.who)}</span><span class="qt"><b>${esc(P.name)}</b>${esc(L.text).replace(/\{hero\}/g, heroName())}</span>`);
+    document.body.appendChild(q);
+    playVoice(file, L.text, on => q.classList.toggle('talk', on));
+    setTimeout(() => { q.classList.add('bye'); setTimeout(() => q.remove(), 400); if (after) after(); }, 4200);
+  }
+
+  // ----- garage -----
+  function garageBlock() {
+    if (!garageOpen()) return lockedBlock('garage', '🚗 Garage', 'leo');
+    const bank = S.worlds[BANK].coins;
+    const rides = RIDES.map(r => {
+      const own = !!S.city.cars[r.id], locked = r.world != null && !S.worlds[r.world].u;
+      const cls = own ? (S.city.ride === r.id ? 'own sel' : 'own') : locked ? 'locked' : bank >= r.cost ? 'can' : 'poor';
+      return `<button class="rideb ${cls}" data-r="${r.id}"><span class="re">${r.e}</span>
+        <span class="rn">${own ? (S.city.ride === r.id ? '✅' : esc(r.n)) : locked ? WD[r.world].icon + '🔒' : '🚜 💰' + fmt(r.cost)}</span></button>`;
+    }).join('');
+    return `<section class="dist garage" data-d="garage">
+      <div class="dhead">🚗 Garage <small>⚡ x${(1 + 0.12 * rideRank()).toFixed(2)} · 🎒 +${5 * rideRank()}</small></div>
+      <div class="mydrive"><span class="myride">${rideEmoji() || '🚶'}</span><span class="mydriver">${curProfile().av}</span></div>
+      <div class="rides">${rides}</div></section>`;
+  }
+  function tapRide(id, btn) {
+    ac();
+    const r = RIDES.find(x => x.id === id);
+    if (S.city.cars[id]) { S.city.ride = id; save(); sfx.honk(); renderCity(); renderLanes(); return; }
+    if (r.world != null && !S.worlds[r.world].u) return shake(btn);
+    if (S.worlds[BANK].coins < r.cost) return shake(btn);
+    S.worlds[BANK].coins -= r.cost;
+    S.city.cars[id] = Date.now(); S.city.ride = id; S.pend = true; save();
+    sfx.honk(); confetti(70); toast(`${r.e} ${r.n}!`);
+    renderCity(); renderLanes(); refreshUI();
+  }
+
+  // ----- food street -----
+  function tipsOf(f) {
+    const since = S.city.food[f.id];
+    if (!since) return 0;
+    const secs = Math.min(TIP_CAP, (Date.now() - since) / 1000);
+    return Math.floor(secs * f.cost / TIP_PAYBACK);
+  }
+  function foodBlock() {
+    if (!foodOpen()) return lockedBlock('food', '🍽️ Food Street', 'pablo');
+    const bank = S.worlds[BANK].coins;
+    const spots = FOOD.map(f => {
+      const own = !!S.city.food[f.id];
+      if (own) {
+        const crowd = ['🧑', '👧', '👴', '👩', '👦'].slice(0, 2 + (f.id.length % 3)).map((c, i) => `<i style="animation-delay:-${i * 0.3}s">${c}</i>`).join('');
+        return `<button class="eat own" data-f="${f.id}"><span class="fe">${f.e}</span><span class="fn">${esc(f.n)}</span>
+          <span class="tip" data-tip="${f.id}"></span><span class="crowd">${crowd}</span></button>`;
+      }
+      return `<button class="eat ${bank >= f.cost ? 'can' : 'poor'}" data-f="${f.id}"><span class="fe">🏚️</span><span class="fn">${esc(f.n)}</span>
+        <span class="price">🚜 💰${fmt(f.cost)}</span></button>`;
+    }).join('');
+    return `<section class="dist food" data-d="food"><div class="dhead">🍽️ Food Street</div><div class="eats">${spots}</div></section>`;
+  }
+  function tapFood(id, btn) {
+    ac();
+    const f = FOOD.find(x => x.id === id);
+    if (S.city.food[id]) {
+      const t = tipsOf(f);
+      if (t < 1) { sfx.pop(); return; }
+      payBank(t); S.city.food[id] = Date.now(); save();
+      sfx.coin(); flyCoins(btn, 3); toast(`+${fmt(t)} 💰`);
+      updateTips(); refreshUI();
+      return;
+    }
+    if (S.worlds[BANK].coins < f.cost) return shake(btn);
+    S.worlds[BANK].coins -= f.cost;
+    S.city.food[id] = Date.now(); S.pend = true; save();
+    confetti(90); sfx.partyHorn(); renderCity(); refreshUI();
+    quip('o_eat');
+  }
+  function updateTips() {
+    document.querySelectorAll('#city [data-tip]').forEach(s => {
+      const t = tipsOf(FOOD.find(f => f.id === s.dataset.tip));
+      s.textContent = t >= 1 ? '💰' + fmt(t) : '';
+      s.classList.toggle('full', t >= 1);
+    });
+  }
+
+  function lockedBlock(d, title, who) {
+    return `<section class="dist locked ${d}" data-d="${d}"><div class="dhead">${title}</div>
+      <div class="fog"><span>☁️</span><span>🔒</span><span>${face(who)}</span></div><div style="height:70px"></div></section>`;
+  }
+
+  // ----- rescues & visitors -----
+  const RESCUES = [
+    { id: 'fire', e: '🔥', crew: 'woof', ride: '🚒', need: 'q11', line: 'r_fire' },
+    { id: 'jam', e: '🚦', crew: 'whiskers', ride: '🚓', need: 'q20', line: 'r_jam' },
+    { id: 'hurt', e: '🤕', crew: 'hoot', ride: '🚁', need: 'q24', line: 'r_hurt' },
+  ];
+  const VISITORS = [
+    { id: 'icecream', e: '🍦', line: 'v_icecream', need: 'q4', sec: 45 },
+    { id: 'unicorn', e: '🦄', line: 'v_unicorn', need: 'q5', sec: 90 },
+    { id: 'balloon', e: '🎈', need: 'q18', sec: 60 },
+    { id: 'super', e: '🦸', line: 'v_super', need: 'q11', sec: 120 },
+    { id: 'dragon', e: '🐉', line: 'v_dragon', need: 'q28', sec: 180 },
+  ];
+  let cityEv = null, visitor = null, cityT = 0, busyRescue = false;
+  function openDistricts() {
+    return [...document.querySelectorAll('#city .dist[data-d]')].filter(b => !b.classList.contains('locked') && /^\d$/.test(b.dataset.d));
+  }
+  function spawnRescue() {
+    const kinds = RESCUES.filter(r => S.story.done[r.need]);
+    const spots = openDistricts();
+    if (!kinds.length || !spots.length) return;
+    const r = pick(kinds), b = pick(spots);
+    cityEv = { r, d: b.dataset.d, x: 20 + Math.random() * 55, until: Date.now() + 25000 };
+    attachCityThings();
+    tone(880, 0.12, 'square', 0.06); tone(660, 0.12, 'square', 0.06, null, 0.15); // nee-naw
+  }
+  function spawnVisitor() {
+    const kinds = VISITORS.filter(v => S.story.done[v.need]);
+    const roads = [...document.querySelectorAll('#city .croad')];
+    if (!kinds.length || !roads.length) return;
+    visitor = { v: pick(kinds), road: Math.floor(Math.random() * roads.length), x: 15 + Math.random() * 65, until: Date.now() + 15000 };
+    attachCityThings();
+    sfx.tiny();
+  }
+  // keep the rescue / visitor buttons in sync with state, without replacing ones already on screen
+  function attachCityThings() {
+    const cev = $('#city .cev');
+    if (cev && (!cityEv || cev._ev !== cityEv)) { if (!busyRescue) cev.remove(); }
+    if (cityEv && !$('#city .cev')) {
+      const b = $(`#city .dist[data-d="${cityEv.d}"]`);
+      if (b && !b.classList.contains('locked')) {
+        const e = el('button', 'cev', `<span>${cityEv.r.e}</span><i>🚨</i>`);
+        e._ev = cityEv;
+        e.style.left = cityEv.x + '%';
+        e.addEventListener('click', () => doRescue(b, e));
+        b.appendChild(e);
+      } else cityEv = null;
+    }
+    const vis = $('#city .visitor');
+    if (vis && (!visitor || vis._v !== visitor)) vis.remove();
+    if (visitor && !$('#city .visitor')) {
+      const road = document.querySelectorAll('#city .croad')[visitor.road];
+      if (road) {
+        const e = el('button', 'visitor', visitor.v.e);
+        e._v = visitor;
+        e.style.left = visitor.x + '%';
+        e.addEventListener('click', () => meetVisitor(e));
+        road.appendChild(e);
+      } else visitor = null;
+    }
+  }
+  function doRescue(block, spot) {
+    if (busyRescue || !cityEv) return;
+    busyRescue = true; ac();
+    const r = cityEv.r;
+    const z = el('div', 'zoomer' + (r.ride === '🚁' ? ' air' : ''), `<span>${r.ride}</span><b>${face(r.crew)}</b>`);
+    z.style.setProperty('--to', cityEv.x + '%');
+    block.appendChild(z);
+    if (r.ride === '🚁') tone(90, 1.2, 'sawtooth', 0.05); else [0, 0.35, 0.7].forEach(d => { tone(960, 0.18, 'square', 0.05, null, d); tone(720, 0.18, 'square', 0.05, null, d + 0.18); });
+    setTimeout(() => {
+      spot.innerHTML = '<span>✅</span>';
+      const amt = townReward(40);
+      payBank(amt); S.city.rescues = (S.city.rescues || 0) + 1; save();
+      confetti(60); sfx.coin(); toast(`${r.ride} +${fmt(amt)} 💰`);
+      quip(r.line);
+      setTimeout(() => { z.remove(); spot.remove(); cityEv = null; busyRescue = false; refreshUI(); }, 1200);
+    }, 1300);
+  }
+  function meetVisitor(e) {
+    if (!visitor) return;
+    ac();
+    const v = visitor.v, amt = townReward(v.sec);
+    visitor = null;
+    e.classList.add('poof');
+    payBank(amt); S.city.visitors[v.id] = (S.city.visitors[v.id] || 0) + 1; save();
+    sfx.yippee(); confetti(50); toast(`${v.e} +${fmt(amt)} 💰`);
+    if (v.line) quip(v.line);
+    setTimeout(() => e.remove(), 500);
+    refreshUI();
+  }
+
+  // ----- day & night (a whole day takes about 6 minutes) -----
+  const DAY_LEN = 360;
+  function dayPhase() { return (Date.now() / 1000 % DAY_LEN) / DAY_LEN; }
+  function dayNight() {
+    const p = dayPhase(), box = $('#city');
+    const night = p > 0.68 && p < 0.93, dusk = (p > 0.6 && p <= 0.68) || p >= 0.93;
+    box.classList.toggle('night', night);
+    box.classList.toggle('dusk', dusk);
+    const sky = $('#city .skyicon');
+    if (sky) sky.textContent = night ? '🌙' : dusk ? '🌇' : '☀️';
+  }
+
+  // every frame: called from the main loop
+  function cityTick(dt) {
+    if (view !== 'city' || document.hidden) return;
+    cityT += dt;
+    if (cityT < 1) return;
+    cityT = 0;
+    dayNight();
+    updateTips();
+    if (talking || !$('#modal').classList.contains('hidden') || S.play.lock) return;
+    const now = Date.now();
+    if (cityEv && now > cityEv.until && !busyRescue) { cityEv = null; attachCityThings(); }
+    if (visitor && now > visitor.until) { visitor = null; attachCityThings(); }
+    if (!cityEv && Math.random() < 1 / 20) spawnRescue();
+    if (!visitor && Math.random() < 1 / 30) spawnVisitor();
+  }
+  // first visit to a newly opened place gets a hello
+  function cityHellos() {
+    if (garageOpen() && !S.city.hi.garage) { S.city.hi.garage = 1; save(); quip('o_garage'); return true; }
+    if (foodOpen() && !S.city.hi.food) { S.city.hi.food = 1; save(); quip('o_food'); return true; }
+    return false;
   }
 
   // the world's buildings stand in a little town; bought ones appear, the next one is for sale
@@ -2005,6 +2280,7 @@
     }
     updatePlay(dt);
     renderLock();
+    cityTick(dt);
     uiT += dt; saveT += dt;
     if (uiT > 0.25) { uiT = 0; refreshUI(); checkAch(); timePill(); checkStory(); renderQuest(); }
     if (saveT > 5) { saveT = 0; save(); }
@@ -2056,7 +2332,7 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
-  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, goWorld, sync, setView, showWonder, WONDERS, get talking() { return talking; }, authInit, accountSync, openGrownups,
+  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, goWorld, sync, setView, showWonder, WONDERS, spawnRescue: () => spawnRescue(), spawnVisitor: () => spawnVisitor(), RIDES, FOOD, get talking() { return talking; }, authInit, accountSync, openGrownups,
     // test hook: render sounds into an OfflineAudioContext
     audio: { VOICES, fart, sfx, voice(n) { voiceGain = VOICE_GAIN[n] || 1; VOICES[n](); voiceGain = 1; }, useContext(ctx) { AC = ctx; OUT = ctx.destination; NOISE = null; } } }; // handy for debugging
 })();
