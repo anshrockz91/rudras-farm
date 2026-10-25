@@ -113,6 +113,7 @@
   // ---------- state ----------
   const DEFAULT_TASKS = ['🧸 Tidy up your play area', '🍎 Eat a healthy snack', '💧 Drink a glass of water', '📚 Read a book for 10 minutes', '🤸 Do 10 jumping jacks'];
   const parentDefaults = () => ({ pin: null, salt: '', ti: 0, timer: { on: false, minutes: 15, daily: 0, tasks: DEFAULT_TASKS.slice() } });
+  const storyDefaults = () => ({ q: 0, done: {}, intro: false, finale: false });
   const playDefaults = () => ({ used: 0, day: '', dayUsed: 0, extra: 0, warned: false, lock: null });
   function freshWorld(w) {
     return {
@@ -122,7 +123,7 @@
     };
   }
   function fresh() {
-    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, parent: parentDefaults(), play: playDefaults(), mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
+    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, parent: parentDefaults(), play: playDefaults(), story: storyDefaults(), mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
   }
   function mergeWorld(w, d) {
     const g = freshWorld(w);
@@ -205,6 +206,7 @@
     base.parent = Object.assign(parentDefaults(), d.parent || {});
     base.parent.timer = Object.assign(parentDefaults().timer, (d.parent || {}).timer || {});
     base.play = Object.assign(playDefaults(), d.play || {});
+    base.story = Object.assign(storyDefaults(), d.story || {});
     base.rev = d.rev | 0;
     base.pend = !!d.pend;
     if (d.last) base.last = d.last;
@@ -293,7 +295,7 @@
     const b = S.worlds[w].b;
     return WD[w].lanes[k].time / ((k === 0 && b[0] ? 2 : 1) * (b[1] ? 1.5 : 1));
   }
-  const starCount = () => ACH.reduce((t, a) => t + (S.ach[a.id] ? a.s : 0), 0);
+  const starCount = () => ACH.reduce((t, a) => t + (S.ach[a.id] ? a.s : 0), 0) + Object.keys(S.story.done).length;
   const worldsDone = () => S.worlds.filter(g => g.b[5]).length;
   function mult(w = S.cur) {
     const b = S.worlds[w].b;
@@ -829,13 +831,13 @@
     WD.forEach((D, w) => {
       const g = S.worlds[w];
       const icon = g.u || !D.wonder ? D.icon : '❓'; // the secret world stays a mystery
-      const b = el('button', 'wbub' + (w === S.cur ? ' cur' : '') + (g.u ? '' : ' locked') + (g.u && !S.seen[w] ? ' new' : ''),
+      const b = el('button', 'wbub' + (w === S.cur && view === 'world' ? ' cur' : '') + (g.u ? '' : ' locked') + (g.u && !S.seen[w] ? ' new' : ''),
         `<span class="wi">${icon}</span><span class="wc">${g.u ? fmt(g.coins) : '🔒'}</span>`);
       b.addEventListener('click', () => g.u ? goWorld(w) : shake(b));
       mapEl.appendChild(b);
     });
-    const m = el('button', 'wbub mapbtn', `<span class="wi">🗺️</span><span class="wc"></span>`);
-    m.addEventListener('click', () => showMap());
+    const m = el('button', 'wbub mapbtn' + (view === 'city' ? ' cur' : ''), `<span class="wi">🏙️</span><span class="wc"></span>`);
+    m.addEventListener('click', () => { ac(); sfx.pop(); setView('city'); });
     mapEl.appendChild(m);
     refreshMapBtn();
   }
@@ -850,7 +852,7 @@
   const wonderReady = x => !wonderBuilt(x) && needMet(x) && canPay(x);
   function refreshMapBtn() {
     const m = mapEl.querySelector('.mapbtn'); if (!m) return;
-    m.lastChild.textContent = WONDERS.filter(wonderBuilt).length + '/' + WONDERS.length;
+    m.lastChild.textContent = '😊 ' + Object.keys(S.story.done).length;
     m.classList.toggle('new', WONDERS.some(wonderReady));
   }
   function buildWonder(x, btn) {
@@ -858,52 +860,24 @@
     if (!wonderReady(x)) return shake(btn);
     x.cost.forEach(([w, c]) => { S.worlds[w].coins -= c; });
     S.wonders[x.id] = Date.now();
-    const opened = unlockWorlds();
+    unlockWorlds();
     save(); closeModal(); renderMap(); refreshUI();
+    if (view === 'city') renderCity();
     celebrate(x.e, 0, x.n + '!');
     setTimeout(() => confetti(220), 500);
-    if (opened) setTimeout(() => showMap(), 3200);
   }
-  function showMap(sel) {
+  function showWonder(x) {
     ac(); sfx.pop();
-    // the road: world, wonder, world, wonder, ...
-    const stops = [];
-    WD.forEach((D, w) => { stops.push({ w }); if (WONDERS[w]) stops.push({ x: WONDERS[w] }); });
+    const built = wonderBuilt(x), ready = wonderReady(x), prev = WONDERS[WONDERS.indexOf(x) - 1];
     const chip = (ok, html) => `<span class="chip ${ok ? 'ok' : 'no'}">${html} ${ok ? '✅' : '❌'}</span>`;
-    const rows = stops.map((st, i) => {
-      const side = i % 2 ? 'r' : 'l';
-      if (st.w != null) {
-        const D = WD[st.w], g = S.worlds[st.w];
-        const icon = g.u || !D.wonder ? D.icon : '❓';
-        return `<div class="mstop ${side}"><button class="mnode world${g.u ? '' : ' locked'}${st.w === S.cur ? ' cur' : ''}" data-w="${st.w}">${icon}</button>
-          <div class="mlabel">${g.u ? '💰 ' + fmt(g.coins) : '🔒'}${g.b[5] ? ' 👑' : ''}</div></div>`;
-      }
-      const x = st.x, built = wonderBuilt(x), ready = wonderReady(x), open = sel === x.id;
-      const prev = WONDERS[WONDERS.indexOf(x) - 1];
-      const detail = open && !built ? `<div class="wdetail">
-          <div class="wfx">${x.fx}</div>
-          <div class="chips">${prev ? chip(wonderBuilt(prev), prev.e) : ''}${x.need.map(([w, b]) => chip(b === 'u' ? S.worlds[w].u : S.worlds[w].b[b], WD[w].icon + (b === 'u' ? '🔓' : WD[w].build[b].e))).join('')}</div>
-          <div class="chips">${x.cost.map(([w, c]) => chip(S.worlds[w].coins >= c, `${WD[w].icon} 💰${fmt(c)}`)).join('')}</div>
-          <button class="bigbtn${ready ? ' can' : ''}" data-build="${x.id}">🔨 ${x.e}</button></div>` : '';
-      return `<div class="mstop ${side}"><button class="mnode wonder${built ? ' built' : ready ? ' ready' : needMet(x) ? '' : ' locked'}" data-x="${x.id}">${x.e}</button>
-        <div class="mlabel">${x.n}${built ? ' ⭐' : ''}</div>${detail}</div>`;
-    }).join('');
-    openModal(`<h2>🗺️</h2><div class="map">${rows}</div>`);
-    document.querySelectorAll('#sheet .mnode.world').forEach(b => b.addEventListener('click', () => {
-      const w = +b.dataset.w;
-      if (!S.worlds[w].u) return shake(b);
-      closeModal(); goWorld(w);
-    }));
-    document.querySelectorAll('#sheet .mnode.wonder').forEach(b => b.addEventListener('click', () => {
-      const x = WONDERS.find(y => y.id === b.dataset.x);
-      if (wonderBuilt(x)) { sfx.boing(); b.classList.remove('wiggle'); void b.offsetWidth; b.classList.add('wiggle'); return; }
-      showMap(sel === x.id ? null : x.id);
-    }));
-    const bb = $('#sheet [data-build]');
-    if (bb) {
-      bb.addEventListener('click', () => buildWonder(WONDERS.find(y => y.id === bb.dataset.build), bb));
-      bb.closest('.mstop').scrollIntoView({ block: 'center' });
-    }
+    openModal(`<div class="wonderbox"><div class="wbig${built ? ' built' : ''}">${x.e}</div><h2>${x.n}</h2>
+      <div class="wfx">${x.fx}</div>
+      ${built ? '<div class="wfx">⭐⭐⭐⭐⭐</div>' : `
+      <div class="chips">${prev ? chip(wonderBuilt(prev), prev.e) : ''}${x.need.map(([w, b]) => chip(b === 'u' ? S.worlds[w].u : S.worlds[w].b[b], WD[w].icon + (b === 'u' ? '🔓' : WD[w].build[b].e))).join('')}</div>
+      <div class="chips">${x.cost.map(([w, c]) => chip(S.worlds[w].coins >= c, `${WD[w].icon} 💰${fmt(c)}`)).join('')}</div>
+      <button class="bigbtn${ready ? ' can' : ''}" id="wBuild">🔨 ${x.e}</button>`}</div>`);
+    const bb = $('#wBuild');
+    if (bb) bb.addEventListener('click', () => buildWonder(x, bb));
   }
   function applyTheme() {
     const D = WD[S.cur], r = document.documentElement.style;
@@ -913,13 +887,241 @@
   }
   function goWorld(w) {
     ac();
-    if (w === S.cur) { sfx.pop(); return; }
+    if (w === S.cur) {
+      if (view === 'city') { setView('world'); sfx.buy(); } else sfx.pop();
+      return;
+    }
     S.cur = w; S.seen[w] = true;
     bindWorld(); resetRT(); applyTheme();
-    buildFarm(); renderLanes(); renderMap();
+    buildFarm(); renderLanes();
+    view = 'world'; document.body.classList.remove('cityview');
+    renderMap();
     shownCoins = -1; refreshUI(); save();
     window.scrollTo({ top: 0, behavior: 'smooth' });
     sfx.buy(); buzz(20);
+  }
+
+  // ---------- views: the city map (home) or inside a business ----------
+  let view = 'world';
+  function setView(v) {
+    view = v;
+    document.body.classList.toggle('cityview', v === 'city');
+    renderMap();
+    if (v === 'city') {
+      renderCity();
+      const q = activeQuest(), target = q ? $(`#city [data-d="${questDistrict(q)}"]`) : null;
+      setTimeout(() => (target || $('#city .dist[data-d="0"]')).scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
+    } else window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ---------- story: Snoozeville wakes up ----------
+  const { PEOPLE, QUESTS, CHAPTERS } = window.STORY;
+  const activeQuest = () => QUESTS[S.story.q] || null;
+  const helpedQuest = q => !!S.story.done[q.id];
+  const personHelped = id => QUESTS.some(q => q.who === id && helpedQuest(q));
+  const face = id => (personHelped(id) ? PEOPLE[id].job : PEOPLE[id].e);
+  const heroName = () => esc(curProfile().name);
+  const townName = () => (S.story.finale ? `${curProfile().name}ville` : 'Snoozeville');
+  function goalMet(g) {
+    const [t, w, k, n] = g;
+    if (t === 'wonder') return !!S.wonders[w];
+    const W = S.worlds[w];
+    if (t === 'sold') return W.lanes[k].sold >= n;
+    if (t === 'lane') return W.lanes[k].u;
+    if (t === 'hire') return W.lanes[k].col > 0;
+    if (t === 'build') return W.b[k];
+    return false;
+  }
+  function goalChip(g) {
+    const [t, w, k, n] = g;
+    if (t === 'wonder') { const x = WONDERS.find(y => y.id === w); return `🏙️ ${x.e} 🔨`; }
+    const D = WD[w], where = w !== S.cur || view === 'city' ? D.icon + ' ' : '';
+    if (t === 'sold') return `${where}${D.lanes[k].p} ${Math.min(S.worlds[w].lanes[k].sold, n)}/${n}`;
+    if (t === 'lane') return `${where}${D.lanes[k].a} 🔓`;
+    if (t === 'hire') return `${where}${D.work.col.e} ➕`;
+    if (t === 'build') return `${where}${D.build[k].e} 🔨`;
+    return '';
+  }
+  const questDistrict = q => CHAPTERS[q.c].w;
+  const askStep = q => ({ who: q.who, text: q.ask, file: q.id + 'a', quest: q });
+  const chapterStep = c => ({ who: CHAPTERS[c].who, text: CHAPTERS[c].text, file: 'ch' + c, chapter: `${c + 1}. ${CHAPTERS[c].title}` });
+  function completeQuest(q, show) {
+    S.story.done[q.id] = Date.now();
+    S.story.q = QUESTS.indexOf(q) + 1;
+    if (show) { const [w, amt] = q.r; S.worlds[w].coins += amt; S.worlds[w].total += amt; }
+    S.pend = true; save();
+    renderQuest(); refreshMapBtn();
+    if (view === 'city') renderCity();
+    if (!show) return;
+    talk({ who: q.who, text: q.thanks, file: q.id + 'b', reward: q.r, shop: q.shop });
+    const nq = activeQuest();
+    if (nq) { if (nq.c !== q.c) talk(chapterStep(nq.c)); talk(askStep(nq)); }
+  }
+  // progress made before the story existed counts straight away (no rewards, no speeches)
+  function silentStory() {
+    let q;
+    while ((q = activeQuest()) && goalMet(q.g)) completeQuest(q, false);
+  }
+  function checkStory() {
+    if (talking || !S.story.intro || S.play.lock) return;
+    const q = activeQuest();
+    if (q) { if (goalMet(q.g)) completeQuest(q, true); return; }
+    if (!S.story.finale) {
+      S.story.finale = true; S.pend = true; save();
+      talk({ who: 'max', text: window.STORY.FINALE.text, file: 'finale', finale: true });
+    }
+  }
+  function startStory() {
+    silentStory();
+    if (S.story.intro) return;
+    S.story.intro = true; S.pend = true; save();
+    talk({ who: 'max', text: window.STORY.INTRO.text, file: 'intro' });
+    const q = activeQuest();
+    if (q) { talk(chapterStep(q.c)); talk(askStep(q)); }
+  }
+
+  // ---------- speech bubbles with voices ----------
+  const talkQ = [];
+  let talking = false, voiceEl = null;
+  function stopVoice() { if (voiceEl) { voiceEl.pause(); voiceEl = null; } if (window.speechSynthesis) speechSynthesis.cancel(); }
+  function playVoice(file, text, onState) {
+    stopVoice();
+    if (S.mute) return;
+    const a = new Audio('audio/' + file + '.mp3');
+    voiceEl = a;
+    a.onplay = () => onState(true);
+    a.onended = a.onpause = () => onState(false);
+    a.play().catch(() => { if (voiceEl === a) say(text.replace(/\{hero\}/g, 'hero')); }); // no audio: browser voice
+  }
+  function talk(step) {
+    talkQ.push(step);
+    if (!talking) nextTalk();
+  }
+  function nextTalk() {
+    const st = talkQ.shift(), box = $('#dlg');
+    if (!st) {
+      talking = false; box.classList.add('hidden'); box.innerHTML = ''; stopVoice();
+      if (!celOpen && celQueue.length) celebrate(...celQueue.shift());
+      return;
+    }
+    talking = true;
+    const P = PEOPLE[st.who];
+    const text = esc(st.text).replace(/\{hero\}/g, heroName());
+    const goW = st.quest ? goalWorldOf(st.quest.g) : null;
+    box.classList.remove('hidden');
+    box.innerHTML = `${st.chapter ? `<div class="chap">${st.chapter}</div>` : ''}
+      <div class="dcard${st.finale ? ' fin' : ''}">
+        <div class="dwho"><span class="dface" id="dFace">${face(st.who)}</span><b>${esc(P.name)}</b>${P.hero ? '<span class="herotag">🦸</span>' : ''}</div>
+        <div class="dtext">${text}</div>
+        ${st.shop ? `<div class="dshop">${st.shop[0]} ${esc(st.shop[1])} ✨</div>` : ''}
+        ${st.reward ? `<div class="dreward">${WD[st.reward[0]].icon} +${fmt(st.reward[1])} 💰 · ⭐</div>` : ''}
+        ${st.quest ? `<div class="dgoal">${goalChip(st.quest.g)}</div>` : ''}
+        <div class="dbtns"><button class="bigbtn" id="dSay">🔊</button>
+          ${goW != null ? `<button class="bigbtn" id="dGo">▶️ ${goW === 'city' ? '🏙️' : WD[goW].icon}</button>` : ''}
+          <button class="bigbtn can" id="dNext">${talkQ.length ? '▶️' : '👍'}</button></div>
+      </div>`;
+    const fc = $('#dFace');
+    const speak = () => playVoice(st.file, st.text, on => fc && fc.classList.toggle('talk', on));
+    speak();
+    if (st.shop || st.finale) { confetti(st.finale ? 260 : 90); sfx.partyHorn(); }
+    $('#dSay').onclick = speak;
+    $('#dNext').onclick = () => { sfx.pop(); nextTalk(); };
+    const go = $('#dGo');
+    if (go) go.onclick = () => {
+      talkQ.length = 0; nextTalk();
+      if (goW === 'city') { setView('city'); const x = WONDERS.find(y => y.id === st.quest.g[1]); setTimeout(() => showWonder(x), 400); }
+      else if (S.worlds[goW].u) goWorld(goW);
+    };
+    if (st.finale) setTimeout(() => { renderCity(); renderQuest(); }, 300);
+  }
+  function goalWorldOf(g) {
+    if (g[0] === 'wonder') return 'city';
+    return S.worlds[g[1]].u ? g[1] : null;
+  }
+
+  // ---------- quest card (always shows what to do next) ----------
+  function renderQuest() {
+    const box = $('#quest'), q = activeQuest();
+    if (!S.story.intro) { box.classList.add('hidden'); return; }
+    box.classList.remove('hidden');
+    const html = q ? `<span class="qface">${face(q.who)}</span><span class="qgoal">${goalChip(q.g)}</span><span class="qgo">💬</span>`
+      : `<span class="qface">🏆</span><span class="qgoal">${esc(townName())} ✨</span><span class="qgo">🏙️</span>`;
+    if (box._h !== html) { box.innerHTML = html; box._h = html; }
+  }
+  $('#quest').addEventListener('click', () => {
+    ac();
+    const q = activeQuest();
+    if (q) talk(askStep(q)); else setView('city');
+  });
+
+  // ---------- the city map ----------
+  const DISTRICTS = ['Farm Fields', 'Pet Street', 'Zoo Park', 'Builder Yard', 'Space Port'];
+  const CITY_ORDER = [4, 3, 2, 'square', 1, 0]; // top to bottom: the town grows up the map
+  function cityCars(seed) {
+    const done = Object.keys(S.story.done).length;
+    if (!done) return '';
+    const pool = ['🚗', '🚕', '🚙', '🚌', '🛵', '🚲'];
+    S.worlds.forEach((g, w) => { if (g.u) pool.push(VEH[w][Math.min(2, tierOf(Math.max(...g.lanes.map(L => L.truck))))]); });
+    const n = Math.min(4, 1 + Math.floor(done / 6));
+    let html = '';
+    for (let i = 0; i < n; i++) {
+      const dur = 7 + ((i * 37 + seed * 13) % 9), back = (i + seed) % 2;
+      html += `<span class="car${back ? ' back' : ''}" style="animation-duration:${dur}s;animation-delay:-${(i * 2.3 + seed * 3.1) % dur}s"><span>${pool[(i * 5 + seed * 3 + done) % pool.length]}</span></span>`;
+    }
+    return html;
+  }
+  function renderCity() {
+    const box = $('#city');
+    const done = Object.keys(S.story.done).length, total = QUESTS.length;
+    const lights = !!S.story.done.q23;
+    let roadN = 0;
+    const road = () => `<div class="croad${lights ? ' lit' : ''}">${cityCars(roadN++)}</div>`;
+    const blocks = CITY_ORDER.map(d => {
+      if (d === 'square') {
+        const walkers = Object.keys(PEOPLE).filter(id => personHelped(id)).slice(0, 10)
+          .map((id, i) => `<span class="walker" style="animation-duration:${9 + (i % 4) * 3}s;animation-delay:-${i * 1.7}s;top:${58 + (i % 3) * 12}%">${PEOPLE[id].job}</span>`).join('');
+        return `<section class="dist square" data-d="square">
+          <div class="dhead">⛲ Town Square</div>
+          <div class="sqrow"><button class="hall" data-who="max"><span>🏛️</span><b>${face('max')}</b></button>
+          ${WONDERS.map(x => `<button class="landmark${wonderBuilt(x) ? ' built' : wonderReady(x) ? ' ready' : needMet(x) ? '' : ' locked'}" data-x="${x.id}"><span>${x.e}</span><i>${esc(x.n)}</i></button>`).join('')}</div>
+          <div class="plaza">${walkers}</div>
+        </section>`;
+      }
+      const D = WD[d], g = S.worlds[d];
+      const shops = QUESTS.filter(q => q.shop && questDistrict(q) === d).map(q => {
+        const isNow = activeQuest() === q, st = helpedQuest(q) ? 'open' : isNow ? 'now' : 'closed';
+        return `<button class="shop ${st}" data-q="${q.id}">
+          <span class="se">${st === 'open' ? q.shop[0] : '🏚️'}</span>
+          <span class="so">${face(q.who)}${st === 'now' ? '<i>❗</i>' : st === 'closed' ? '<i>💤</i>' : ''}</span>
+          <span class="sn">${st === 'open' ? esc(q.shop[1]) : esc(PEOPLE[q.who].name)}</span></button>`;
+      }).join('');
+      const builds = D.build.map((b, i) => `<span class="cb${g.b[i] ? ' on' : ''}">${g.b[i] ? b.e : '🟫'}</span>`).join('');
+      const icon = g.u || !D.wonder ? D.icon : '❓';
+      const here = activeQuest() && questDistrict(activeQuest()) === d;
+      return `<section class="dist d${d}${g.u ? '' : ' locked'}${here ? ' here' : ''}" data-d="${d}" style="--dt:${D.lanes[0].tint};--dg:${D.bg[3]}">
+        <div class="dhead">${icon} ${g.u ? DISTRICTS[d] : '???'}${g.b[5] ? ' 👑' : ''}</div>
+        <div class="cbuilds">${builds}</div>
+        <div class="shops">${shops}</div>
+        ${g.u ? `<button class="dgo" data-w="${d}">▶️</button>` : '<div class="fog"><span>☁️</span><span>🔒</span><span>☁️</span></div>'}
+      </section>`;
+    });
+    box.style.setProperty('--sat', (0.3 + 0.7 * done / total).toFixed(2));
+    box.innerHTML = `<div class="sign${S.story.finale ? ' gold' : ''}">${S.story.finale ? '✨' : '💤'} ${esc(townName())} ${S.story.finale ? '✨' : '💤'}<small>😊 ${done}/${total}</small></div>`
+      + blocks.join(road());
+    box.querySelectorAll('.dgo').forEach(b => b.addEventListener('click', () => goWorld(+b.dataset.w)));
+    box.querySelectorAll('.landmark').forEach(b => b.addEventListener('click', () => showWonder(WONDERS.find(x => x.id === b.dataset.x))));
+    box.querySelectorAll('.hall').forEach(b => b.addEventListener('click', () => {
+      const q = activeQuest();
+      if (q && q.who === 'max') talk(askStep(q)); else talk({ who: 'max', text: window.STORY.INTRO.text, file: 'intro' });
+    }));
+    box.querySelectorAll('.shop').forEach(b => b.addEventListener('click', () => {
+      const q = QUESTS.find(x => x.id === b.dataset.q);
+      b.classList.remove('wiggle'); void b.offsetWidth; b.classList.add('wiggle');
+      if (helpedQuest(q)) talk({ who: q.who, text: q.thanks, file: q.id + 'b' });
+      else if (activeQuest() === q) talk(askStep(q));
+      else { sfx.pop(); toast('💤'); }
+    }));
+    box.querySelectorAll('.dist.locked').forEach(b => b.addEventListener('click', () => shake(b)));
   }
 
   // the world's buildings stand in a little town; bought ones appear, the next one is for sale
@@ -1082,7 +1284,7 @@
     if (!celOpen && celQueue.length) celebrate(...celQueue.shift());
   }
   function celebrate(e, stars, text) {
-    if (celOpen) { celQueue.push([e, stars, text]); return; }
+    if (celOpen || talking) { celQueue.push([e, stars, text]); return; }
     celOpen = true;
     const box = $('#celebrate');
     box.innerHTML = `<div class="cel-card"><div class="cel-rays"></div><div class="cel-e">${e}</div>${stars ? `<div class="cel-s">${'⭐'.repeat(stars)}</div>` : ''}<div class="cel-t">${text || ''}</div></div>`;
@@ -1245,7 +1447,8 @@
       }
       let theirs = null;
       try { theirs = cloud && cloud.data ? parseSave(JSON.parse(cloud.data)) : null; } catch (e) { /* unreadable cloud copy */ }
-      if (!force && theirs && cloud.rev > S.rev && (!S.pend || progress(theirs) > progress(S))) {
+      // newer copy from another device wins unless this device has made more progress (a tie goes to the cloud)
+      if (!force && theirs && cloud.rev > S.rev && (!S.pend || progress(theirs) >= progress(S))) {
         adopt(theirs, cloud.rev); // another device has newer progress
       } else if (force || S.pend || !cloud || cloud.rev < S.rev) {
         const rev = Math.max(cloud ? cloud.rev : 0, S.rev) + 1, snap = snapshot(), st = S;
@@ -1288,6 +1491,8 @@
     bindWorld(); resetRT(); applyTheme();
     buildFarm(); renderLanes(); renderMap();
     silentAch();
+    startStory(); renderQuest();
+    if (view === 'city') renderCity();
     shownCoins = -1; shownStars = -1; refreshUI(); updateProfBtn();
   }
   function updateProfBtn() { $('#profAv').textContent = curProfile().av; }
@@ -1584,6 +1789,7 @@
     const box = $('#lock');
     if (!L) { box.classList.add('hidden'); box.innerHTML = ''; return; }
     const day = L.type === 'day';
+    stopVoice();
     box.classList.remove('hidden');
     box.innerHTML = `<div class="lockcard">
       <div class="lk-e">${day ? '🌙' : '⏰'}</div>
@@ -1800,7 +2006,7 @@
     updatePlay(dt);
     renderLock();
     uiT += dt; saveT += dt;
-    if (uiT > 0.25) { uiT = 0; refreshUI(); checkAch(); timePill(); }
+    if (uiT > 0.25) { uiT = 0; refreshUI(); checkAch(); timePill(); checkStory(); renderQuest(); }
     if (saveT > 5) { saveT = 0; save(); }
     S.last = Date.now();
     requestAnimationFrame(tick);
@@ -1838,6 +2044,9 @@
   updateProfBtn();
   refreshUI();
   applyOffline();
+  setView('city');
+  startStory();
+  renderQuest();
   requestAnimationFrame(tick);
   sync();
   if (PR.acct) authInit().catch(() => { /* offline */ });
@@ -1847,7 +2056,7 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
-  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, goWorld, sync, showMap, WONDERS, authInit, accountSync, openGrownups,
+  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, goWorld, sync, setView, showWonder, WONDERS, get talking() { return talking; }, authInit, accountSync, openGrownups,
     // test hook: render sounds into an OfflineAudioContext
     audio: { VOICES, fart, sfx, voice(n) { voiceGain = VOICE_GAIN[n] || 1; VOICES[n](); voiceGain = 1; }, useContext(ctx) { AC = ctx; OUT = ctx.destination; NOISE = null; } } }; // handy for debugging
 })();

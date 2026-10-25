@@ -1,6 +1,6 @@
 // Offline cache: serve from cache instantly, refresh in the background.
-const CACHE = 'rudras-farm-v6';
-const ASSETS = ['./', 'index.html', 'style.css', 'game.js', 'manifest.webmanifest',
+const CACHE = 'rudras-farm-v7';
+const ASSETS = ['./', 'index.html', 'style.css', 'story.js', 'game.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
