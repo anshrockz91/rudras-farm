@@ -18,5 +18,14 @@ service cloud.firestore {
       allow update: if validSave() && request.resource.data.rev > resource.data.rev;
       allow list, delete: if false;
     }
+    // A signed-in parent's account: just the list of their children's profiles (codes, names, avatars).
+    match /users/{uid} {
+      allow get: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['profiles', 'updated'])
+        && request.resource.data.profiles is list && request.resource.data.profiles.size() <= 30
+        && request.resource.data.updated is int;
+      allow list, delete: if false;
+    }
   }
 }

@@ -409,3 +409,51 @@ main { max-width: 780px; margin: 0 auto; padding: 14px 16px calc(40px + env(safe
 .chip { font-size: 16px; font-weight: 700; border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
 .chip.ok { background: #dcf7c9; } .chip.no { background: #ffe0e0; }
 .wdetail .bigbtn { font-size: 24px; padding: 10px 26px; }
+
+/* ---------- grown-ups area ---------- */
+.center { text-align: center; }
+.pz { background: #f6f2e7; border-radius: 20px; padding: 12px 14px; margin-bottom: 12px; }
+.pz h3 { margin: 0 0 8px; font-size: 20px; }
+.pz .phint { text-align: left; margin: 0 0 8px; }
+.pzrow { display: flex; align-items: center; gap: 8px; font-size: 17px; margin: 8px 0; flex-wrap: wrap; }
+.pz select, .taskin { font: inherit; font-size: 17px; padding: 6px 10px; border-radius: 12px; border: 2px solid #e2d6b8; background: #fff; color: var(--ink); -webkit-user-select: text; user-select: text; }
+.pzstat { font-size: 15px; opacity: .8; margin: 6px 0; }
+.tog { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; }
+.tog input { width: 26px; height: 26px; accent-color: #4caf50; }
+.taskrow { display: flex; gap: 6px; margin-bottom: 6px; }
+.taskin { flex: 1; min-width: 0; }
+.taskx { width: 40px; border-radius: 12px; background: #ffe0e0; font-size: 16px; flex: none; }
+.smallbtn { font-size: 17px; font-weight: 700; padding: 9px 16px; border-radius: 999px; background: #fff; box-shadow: 0 4px 0 rgba(0, 0, 0, .12); }
+.smallbtn:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0, 0, 0, .12); }
+.smallbtn.danger { background: #ffd6d6; }
+.linkbtn { display: block; margin: 8px auto 0; font-size: 15px; text-decoration: underline; opacity: .75; }
+.or { text-align: center; font-size: 14px; opacity: .6; margin: 10px 0 6px; }
+.gbtn { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; max-width: 320px; margin: 0 auto; padding: 11px 14px; border-radius: 14px; background: #fff; font-size: 17px; font-weight: 700; box-shadow: 0 4px 0 rgba(0, 0, 0, .12); border: 2px solid #e6e6e6; }
+.gbtn b { font-size: 20px; color: #4285f4; }
+.amsg { text-align: center; font-size: 15px; font-weight: 700; min-height: 20px; margin-top: 6px; color: #b3261e; }
+.pz .pname { font-size: 17px; margin-bottom: 8px; }
+
+/* PIN pad */
+.pintitle { text-align: center; font-size: 20px; font-weight: 700; margin: 6px 0; }
+.pindots { display: flex; justify-content: center; gap: 14px; margin: 8px 0; }
+.pindots i { width: 18px; height: 18px; border-radius: 50%; border: 3px solid #b9a77f; }
+.pindots i.on { background: #6b5636; border-color: #6b5636; }
+.pindots.bad { animation: shake .35s; }
+.pinmsg { text-align: center; min-height: 22px; font-weight: 700; color: #b3261e; }
+.pinpad { display: grid; grid-template-columns: repeat(3, 76px); gap: 10px; justify-content: center; margin: 6px 0 4px; }
+.pk { height: 64px; border-radius: 18px; background: #fff; font-size: 28px; font-weight: 700; box-shadow: 0 4px 0 rgba(0, 0, 0, .14); }
+.pk:disabled { visibility: hidden; }
+.pk:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0, 0, 0, .14); }
+
+/* break lock */
+#lock { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; padding: 16px;
+  background: radial-gradient(circle at 50% 30%, #fff6c9, #ffd27a 70%); }
+.lockcard { text-align: center; max-width: 520px; width: 100%; }
+.lk-e { font-size: 96px; line-height: 1.1; animation: bob .8s infinite alternate; }
+.lk-t { font-size: clamp(28px, 7vw, 40px); font-weight: 700; margin: 10px 0; }
+.lk-s { font-size: 20px; opacity: .8; margin-bottom: 18px; }
+#lkPad { background: rgba(255, 255, 255, .7); border-radius: 24px; padding: 6px 10px 12px; }
+#lkPad:empty { display: none; }
+.timepill { position: fixed; z-index: 21; top: calc(76px + env(safe-area-inset-top)); right: 16px; background: #fff; border-radius: 999px; padding: 3px 12px; font-size: 16px; font-weight: 700; box-shadow: 0 3px 0 rgba(0, 0, 0, .12); pointer-events: none; }
+.timepill.low { background: #ffd84d; animation: bump .8s infinite; }
+.toast { position: fixed; z-index: 95; left: 50%; top: 22%; transform: translateX(-50%); background: #fff; border-radius: 24px; padding: 14px 24px; font-size: 26px; font-weight: 700; white-space: nowrap; box-shadow: 0 10px 30px rgba(0, 0, 0, .2); animation: celIn .4s cubic-bezier(.3, 1.6, .5, 1); }

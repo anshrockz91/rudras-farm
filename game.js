@@ -111,6 +111,9 @@
   ];
 
   // ---------- state ----------
+  const DEFAULT_TASKS = ['🧸 Tidy up your play area', '🍎 Eat a healthy snack', '💧 Drink a glass of water', '📚 Read a book for 10 minutes', '🤸 Do 10 jumping jacks'];
+  const parentDefaults = () => ({ pin: null, salt: '', ti: 0, timer: { on: false, minutes: 15, daily: 0, tasks: DEFAULT_TASKS.slice() } });
+  const playDefaults = () => ({ used: 0, day: '', dayUsed: 0, extra: 0, warned: false, lock: null });
   function freshWorld(w) {
     return {
       u: w === 0, coins: 0, total: 0, b: [false, false, false, false, false, false],
@@ -119,7 +122,7 @@
     };
   }
   function fresh() {
-    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
+    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, parent: parentDefaults(), play: playDefaults(), mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
   }
   function mergeWorld(w, d) {
     const g = freshWorld(w);
@@ -151,20 +154,22 @@
   function writeJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage blocked */ } }
 
   let PR = readJSON(PROFILES_KEY);
-  const linkCode = cleanCode(new URLSearchParams(location.search).get('p'));
+  const qs = new URLSearchParams(location.search);
+  const imports = (qs.get('import') || '').split(',').map(cleanCode).filter(validCode);
+  const linkCode = cleanCode(qs.get('p') || qs.get('cur') || imports[0]);
   const old = readJSON(SAVE_KEY); // progress from before profiles existed (kept as a backup too)
   if (!PR || !Array.isArray(PR.list) || !PR.list.length) {
     PR = { cur: null, list: [] };
     if (old || !validCode(linkCode)) {
       const code = newCode();
-      PR = { cur: code, list: [{ code, name: 'Rudra', av: '🧒', auto: !old }] };
+      PR = { cur: code, list: [{ code, name: old ? 'Rudra' : 'Player', av: '🧒', auto: !old }] };
       if (old) writeJSON(saveKey(code), old);
     }
   }
   // opening a share link (?p=CODE) adds that profile on this device and switches to it
   if (validCode(linkCode)) {
     dropBlankDefaults(linkCode);
-    if (!PR.list.some(p => p.code === linkCode)) PR.list.push({ code: linkCode, name: '…', av: '🧒' });
+    imports.concat(linkCode).forEach(c => { if (!PR.list.some(p => p.code === c)) PR.list.push({ code: c, name: '…', av: '🧒' }); });
     PR.cur = linkCode;
     history.replaceState(null, '', location.pathname);
   }
@@ -197,6 +202,9 @@
     base.mute = !!d.mute;
     base.silly = d.silly !== false;
     base.wonders = d.wonders || {};
+    base.parent = Object.assign(parentDefaults(), d.parent || {});
+    base.parent.timer = Object.assign(parentDefaults().timer, (d.parent || {}).timer || {});
+    base.play = Object.assign(playDefaults(), d.play || {});
     base.rev = d.rev | 0;
     base.pend = !!d.pend;
     if (d.last) base.last = d.last;
@@ -1126,7 +1134,7 @@
     $('#modal').classList.remove('hidden');
     $('#sheet .x').onclick = closeModal;
   }
-  function closeModal() { $('#modal').classList.add('hidden'); }
+  function closeModal() { $('#modal').classList.add('hidden'); parentOpen = false; }
   $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
 
   function showAchievements() {
@@ -1135,27 +1143,6 @@
     const tiles = [...WD.map(D => D.icon), '🗺️'].map((icon, w) => `<div class="agroup">${icon}</div>` + ACH.filter(a => a.w === w).map(tile).join('')).join('');
     const pct = Math.round(starCount() * 2);
     openModal(`<h2>⭐ ${starCount()}</h2><div class="agrid">${tiles}</div><div class="bonus">⭐ = 💰 +${pct}%</div>`);
-  }
-  function showSettings() {
-    ac(); sfx.pop();
-    openModal(`<h2>⚙️</h2>
-      <div class="setrow"><button class="bigbtn" id="muteBtn">${S.mute ? '🔇' : '🔊'}</button>
-      <button class="bigbtn" id="sillyBtn">${S.silly ? '💨 ✅' : '💨 ❌'}</button>
-      <button class="bigbtn danger" id="resetBtn">🔄</button></div>
-      <div class="setrow hidden" id="confirmRow"><span style="font-size:40px">🔄❓</span>
-      <button class="bigbtn danger" id="yesReset">✅</button><button class="bigbtn" id="noReset">❌</button></div>`);
-    $('#muteBtn').onclick = () => { S.mute = !S.mute; $('#muteBtn').textContent = S.mute ? '🔇' : '🔊'; save(); sfx.pop(); };
-    $('#sillyBtn').onclick = () => {
-      S.silly = !S.silly; $('#sillyBtn').textContent = S.silly ? '💨 ✅' : '💨 ❌'; save();
-      if (S.silly) fart('triple'); else sfx.pop();
-    };
-    $('#resetBtn').onclick = () => $('#confirmRow').classList.remove('hidden');
-    $('#noReset').onclick = () => $('#confirmRow').classList.add('hidden');
-    $('#yesReset').onclick = () => {
-      const mute = S.mute, rev = S.rev;
-      S = fresh(); S.mute = mute; S.rev = rev;
-      save(); reloadAll(); closeModal(); sync(true);
-    };
   }
   $('#starBtn').addEventListener('click', showAchievements);
   $('#setBtn').addEventListener('click', showSettings);
@@ -1252,7 +1239,10 @@
       const cloud = await cloudGet(code);
       if (code !== PR.cur) return; // switched profile while waiting
       const p = curProfile();
-      if (cloud && p.name === '…') { p.name = cloud.name || 'Player'; p.av = cloud.av || p.av; saveProfiles(); updateProfBtn(); }
+      // pick up a rename / new avatar made on another device
+      if (cloud && cloud.name && (p.name === '…' || cloud.rev > S.rev) && (p.name !== cloud.name || p.av !== cloud.av)) {
+        p.name = cloud.name; p.av = cloud.av || p.av; saveProfiles(); updateProfBtn();
+      }
       let theirs = null;
       try { theirs = cloud && cloud.data ? parseSave(JSON.parse(cloud.data)) : null; } catch (e) { /* unreadable cloud copy */ }
       if (!force && theirs && cloud.rev > S.rev && (!S.pend || progress(theirs) > progress(S))) {
@@ -1321,40 +1311,193 @@
     return qrLib;
   }
   const esc = t => String(t).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
+  // ---------- kid-facing profile & settings (grown-up things live behind the PIN) ----------
   const AVATARS = ['🧒', '👦', '👧', '🧑', '👨', '👩', '🐶', '🐱', '🦁', '🐼', '🐯', '🦖'];
   function showProfile() {
     ac(); sfx.pop();
     const p = curProfile();
-    const link = location.origin + location.pathname + '?p=' + p.code;
-    const others = PR.list.filter(x => x.code !== p.code);
     openModal(`<h2 class="pav" id="pAv">${p.av}</h2>
       <input id="pName" class="pname" maxlength="20" value="${esc(p.name)}" aria-label="Name">
       <div class="avs">${AVATARS.map(a => `<button class="av${a === p.av ? ' on' : ''}">${a}</button>`).join('')}</div>
-      <div class="cloudbox">
-        <div class="syncline" id="syncLine"></div>
-        <div class="qr" id="qr"></div>
-        <div class="pcode">${prettyCode(p.code)}</div>
-        <div class="phint">📱 💻 Scan, share or type this code on another device to keep playing there.</div>
-        <button class="bigbtn can" id="shareBtn">📤 Share</button>
-      </div>
-      ${others.length ? `<div class="plist">${others.map(o => `<button class="pbtn" data-c="${o.code}"><span>${o.av}</span>${esc(o.name)}</button>`).join('')}</div>` : ''}
-      <div class="setrow"><button class="bigbtn" id="newProf">➕ 🧒</button><button class="bigbtn" id="joinBtn">🔑</button></div>
-      <div class="setrow hidden" id="joinRow"><input id="joinCode" class="pname" placeholder="TIGER-XXXX-XXXX" autocapitalize="characters" autocomplete="off"><button class="bigbtn can" id="joinGo">✅</button></div>`);
+      <div class="syncline" id="syncLine"></div>
+      <div class="setrow"><button class="bigbtn" id="toParent">👨‍👩‍👧</button></div>`);
     setSync(syncState);
     $('#pName').addEventListener('change', e => {
       p.name = e.target.value.trim().slice(0, 20) || 'Player';
-      saveProfiles(); S.pend = true; save(); sync();
+      saveProfiles(); S.pend = true; save(); sync(); accountSync();
     });
     document.querySelectorAll('#sheet .av').forEach(b => b.addEventListener('click', () => {
-      p.av = b.textContent; saveProfiles(); S.pend = true; save(); sync();
+      p.av = b.textContent; saveProfiles(); S.pend = true; save(); sync(); accountSync();
       document.querySelectorAll('#sheet .av').forEach(x => x.classList.toggle('on', x === b));
       $('#pAv').textContent = p.av; updateProfBtn(); renderLanes(); sfx.pop();
     }));
+    $('#toParent').addEventListener('click', openGrownups);
+  }
+  function showSettings() {
+    ac(); sfx.pop();
+    openModal(`<h2>⚙️</h2>
+      <div class="setrow"><button class="bigbtn" id="muteBtn">${S.mute ? '🔇' : '🔊'}</button>
+      <button class="bigbtn" id="sillyBtn">${S.silly ? '💨 ✅' : '💨 ❌'}</button>
+      <button class="bigbtn" id="toParent">👨‍👩‍👧</button></div>`);
+    $('#muteBtn').onclick = () => { S.mute = !S.mute; $('#muteBtn').textContent = S.mute ? '🔇' : '🔊'; save(); sfx.pop(); };
+    $('#sillyBtn').onclick = () => {
+      S.silly = !S.silly; $('#sillyBtn').textContent = S.silly ? '💨 ✅' : '💨 ❌'; save();
+      if (S.silly) fart('triple'); else sfx.pop();
+    };
+    $('#toParent').addEventListener('click', openGrownups);
+  }
+
+  // ---------- parent PIN ----------
+  async function hashPin(pin, salt) {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pin));
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  const pinBlock = { fails: 0, until: 0 }; // slows down a child guessing PINs
+  function pinPad(box, title, onPin) {
+    let v = '';
+    box.innerHTML = `<div class="pintitle">${title}</div><div class="pindots"></div><div class="pinmsg"></div>
+      <div class="pinpad">${[1, 2, 3, 4, 5, 6, 7, 8, 9, '', 0, '⌫'].map(k => `<button class="pk"${k === '' ? ' disabled' : ''}>${k}</button>`).join('')}</div>`;
+    const dots = box.querySelector('.pindots'), msg = box.querySelector('.pinmsg');
+    const draw = () => { dots.innerHTML = [0, 1, 2, 3].map(i => `<i class="${i < v.length ? 'on' : ''}"></i>`).join(''); };
+    const fail = text => {
+      dots.classList.remove('bad'); void dots.offsetWidth; dots.classList.add('bad');
+      tone(220, 0.2, 'square', 0.08); msg.textContent = text || '';
+    };
+    draw();
+    box.querySelectorAll('.pk').forEach(b => b.addEventListener('click', () => {
+      const k = b.textContent;
+      if (!k) return;
+      tone(900, 0.04, 'triangle', 0.05);
+      if (k === '⌫') v = v.slice(0, -1); else if (v.length < 4) v += k;
+      draw();
+      if (v.length === 4) { const pin = v; v = ''; setTimeout(() => { draw(); onPin(pin, fail); }, 120); }
+    }));
+  }
+  // returns an onPin handler that checks the current profile's PIN
+  function checkPin(ok) {
+    return async (pin, fail) => {
+      const now = Date.now();
+      if (now < pinBlock.until) return fail(`⏳ ${Math.ceil((pinBlock.until - now) / 1000)}s`);
+      if (await hashPin(pin, S.parent.salt) === S.parent.pin) { pinBlock.fails = 0; ok(); return; }
+      pinBlock.fails++;
+      if (pinBlock.fails >= 5) { pinBlock.until = now + 30000 * Math.pow(2, pinBlock.fails - 5); pinBlock.fails = 4; }
+      fail('❌');
+    };
+  }
+  function setPinFlow(done) {
+    openModal(`<h2>👨‍👩‍👧</h2><p class="phint">Grown-ups: choose a 4-digit PIN. You'll need it to unlock play time and open these settings.</p><div id="pinBox"></div>`);
+    pinPad($('#pinBox'), 'New PIN', first => {
+      pinPad($('#pinBox'), 'Same PIN again', async (second, fail) => {
+        if (second !== first) { fail('Didn’t match, try again'); setTimeout(() => setPinFlow(done), 900); return; }
+        const salt = newCode();
+        S.parent.salt = salt;
+        S.parent.pin = await hashPin(first, salt);
+        S.pend = true; save(); sync();
+        done();
+      });
+    });
+  }
+  let parentOpen = false;
+  function openGrownups() {
+    ac();
+    if (!S.parent.pin) return setPinFlow(showParent);
+    openModal(`<h2>👨‍👩‍👧</h2><div id="pinBox"></div><button class="linkbtn" id="forgotPin">Forgot PIN?</button>`);
+    pinPad($('#pinBox'), 'PIN', checkPin(showParent));
+    $('#forgotPin').onclick = forgotPin;
+  }
+  function forgotPin() {
+    openModal(`<h2>🔑</h2>
+      <p class="phint">Type this game's secret code (shown under Profiles when you set things up), or sign in with the parent account's email and password.</p>
+      <input id="fpCode" class="pname" placeholder="TIGER-XXXX-XXXX" autocapitalize="characters" autocomplete="off">
+      <div class="setrow"><button class="bigbtn can" id="fpCodeGo">✅</button></div>
+      <div class="or">or</div>
+      <input id="fpEmail" class="pname" type="email" placeholder="Email" autocomplete="username">
+      <input id="fpPass" class="pname" type="password" placeholder="Password" autocomplete="current-password">
+      <div class="setrow"><button class="bigbtn" id="fpEmailGo">✅</button></div><div class="amsg" id="fpMsg"></div>`);
+    const resetPin = () => { S.parent.pin = null; S.pend = true; save(); setPinFlow(showParent); };
+    $('#fpCodeGo').onclick = e => (cleanCode($('#fpCode').value) === PR.cur ? resetPin() : shake(e.currentTarget));
+    $('#fpEmailGo').onclick = async () => {
+      $('#fpMsg').textContent = '🔄';
+      try {
+        const A = await authInit();
+        await A.signInWithEmailAndPassword(auth, $('#fpEmail').value.trim(), $('#fpPass').value);
+        await accountSync(true);
+        if (acctCodes.includes(PR.cur)) resetPin();
+        else $('#fpMsg').textContent = 'This game isn’t saved to that account.';
+      } catch (e) { $('#fpMsg').textContent = authError(e); }
+    };
+  }
+
+  // ---------- the grown-ups screen ----------
+  function showParent() {
+    parentOpen = true;
+    const p = curProfile(), T = S.parent.timer;
+    const link = location.origin + location.pathname + '?p=' + p.code;
+    const others = PR.list.filter(x => x.code !== p.code);
+    const opt = (vals, cur, label) => vals.map(v => `<option value="${v}"${+cur === v ? ' selected' : ''}>${label(v)}</option>`).join('');
+    openModal(`<h2>👨‍👩‍👧 Grown-ups</h2>
+      <p class="phint center">Settings for <b>${p.av} ${esc(p.name)}</b></p>
+      <section class="pz">
+        <h3>⏳ Play time</h3>
+        <label class="tog"><input type="checkbox" id="tOn"${T.on ? ' checked' : ''}><span>Lock the game for a break</span></label>
+        <div class="pzrow">after <select id="tMin">${opt([5, 10, 15, 20, 30, 45, 60], T.minutes, v => v + ' min')}</select> of play</div>
+        <div class="pzrow">Daily limit <select id="tDay">${opt([0, 30, 45, 60, 90, 120, 180], T.daily, v => (v ? v + ' min' : 'none'))}</select></div>
+        <div class="pzstat">Today: ${Math.floor(S.play.dayUsed / 60)} min played${T.on ? ` · next break in ${Math.max(0, Math.ceil((T.minutes * 60 - S.play.used) / 60))} min` : ''}</div>
+        <div class="setrow"><button class="smallbtn" id="lockNow">🔒 Break now</button><button class="smallbtn" id="newSession">⏱️ Restart timer</button></div>
+      </section>
+      <section class="pz">
+        <h3>📝 Break tasks</h3>
+        <p class="phint">When time is up your child sees the next task (read aloud). Only your PIN starts the next session.</p>
+        <div id="taskList"></div>
+        <button class="smallbtn" id="addTask">➕ Add a task</button>
+      </section>
+      <section class="pz">
+        <h3>👤 Profiles</h3>
+        <div class="cloudbox">
+          <div class="syncline" id="syncLine"></div>
+          <div class="qr" id="qr"></div>
+          <div class="pcode">${prettyCode(p.code)}</div>
+          <div class="phint">Secret code for ${esc(p.name)}'s game. Scan, share or type it on another device. Keep a copy somewhere safe.</div>
+          <button class="smallbtn" id="shareBtn">📤 Share</button>
+        </div>
+        ${others.length ? `<div class="plist">${others.map(o => `<button class="pbtn" data-c="${o.code}"><span>${o.av}</span>${esc(o.name)}</button>`).join('')}</div>` : ''}
+        <div class="setrow"><button class="smallbtn" id="newProf">➕ New player</button><button class="smallbtn" id="joinBtn">🔑 I have a code</button></div>
+        <div class="setrow hidden" id="joinRow"><input id="joinCode" class="pname" placeholder="TIGER-XXXX-XXXX" autocapitalize="characters" autocomplete="off"><button class="bigbtn can" id="joinGo">✅</button></div>
+      </section>
+      <section class="pz">
+        <h3>☁️ Parent account</h3>
+        <div id="acctBox"></div>
+      </section>
+      <section class="pz">
+        <h3>⚙️ More</h3>
+        <div class="setrow"><button class="smallbtn" id="chgPin">🔢 Change PIN</button><button class="smallbtn danger" id="resetBtn">🔄 Restart this game</button></div>
+        <div class="setrow hidden" id="confirmRow"><span>Start ${esc(p.name)}'s game from zero?</span>
+          <button class="smallbtn danger" id="yesReset">Yes, restart</button><button class="smallbtn" id="noReset">No</button></div>
+      </section>`);
+    setSync(syncState);
+    renderAcct();
+    const changed = () => { S.pend = true; save(); sync(); };
+    $('#tOn').onchange = e => { T.on = e.target.checked; if (T.on) { S.play.used = 0; S.play.warned = false; } changed(); };
+    $('#tMin').onchange = e => { T.minutes = +e.target.value; changed(); };
+    $('#tDay').onchange = e => { T.daily = +e.target.value; changed(); };
+    $('#lockNow').onclick = () => { T.on = true; S.play.used = T.minutes * 60; changed(); closeModal(); };
+    $('#newSession').onclick = e => { S.play.used = 0; S.play.warned = false; changed(); e.currentTarget.textContent = '✅'; };
+    const drawTasks = () => {
+      $('#taskList').innerHTML = T.tasks.map((t, i) => `<div class="taskrow"><input class="taskin" data-i="${i}" maxlength="80" value="${esc(t)}"><button class="taskx" data-i="${i}" aria-label="Remove">✖</button></div>`).join('')
+        || '<p class="phint">No tasks yet: a simple "Take a break" screen is shown.</p>';
+      document.querySelectorAll('#taskList .taskin').forEach(inp => inp.addEventListener('change', () => { T.tasks[+inp.dataset.i] = inp.value.trim(); T.tasks = T.tasks.filter(Boolean); changed(); drawTasks(); }));
+      document.querySelectorAll('#taskList .taskx').forEach(b => b.addEventListener('click', () => { T.tasks.splice(+b.dataset.i, 1); changed(); drawTasks(); }));
+    };
+    drawTasks();
+    $('#addTask').onclick = () => {
+      T.tasks.push(''); drawTasks();
+      const ins = document.querySelectorAll('#taskList .taskin'); ins[ins.length - 1].placeholder = 'e.g. 🦷 Brush your teeth'; ins[ins.length - 1].focus();
+    };
     $('#shareBtn').addEventListener('click', async e => {
       const btn = e.currentTarget;
       try {
-        if (navigator.share) await navigator.share({ title: "Rudra's Farm", text: `${p.name}'s farm: ${prettyCode(p.code)}`, url: link });
-        else { await navigator.clipboard.writeText(link); btn.textContent = '✅ 📋'; }
+        if (navigator.share) await navigator.share({ title: "Rudra's Farm", text: `${p.name}'s game: ${prettyCode(p.code)}`, url: link });
+        else { await navigator.clipboard.writeText(link); btn.textContent = '✅ Copied'; }
       } catch (err) { /* share sheet closed */ }
     });
     loadQR().then(() => {
@@ -1363,11 +1506,12 @@
     }).catch(() => { const box = $('#qr'); if (box) box.remove(); });
     document.querySelectorAll('#sheet .pbtn').forEach(b => b.addEventListener('click', () => { sfx.buy(); switchProfile(b.dataset.c); }));
     $('#newProf').addEventListener('click', () => {
-      const code = newCode();
+      const code = newCode(), rules = JSON.parse(JSON.stringify(S.parent)); // same PIN and play rules
       PR.list.push({ code, name: 'Player ' + (PR.list.length + 1), av: AVATARS[PR.list.length % AVATARS.length] });
       saveProfiles(); sfx.buy();
       switchProfile(code);
-      showProfile();
+      S.parent = rules; S.pend = true; save(); sync(); accountSync();
+      showParent();
     });
     $('#joinBtn').addEventListener('click', () => { $('#joinRow').classList.remove('hidden'); $('#joinCode').focus(); });
     $('#joinGo').addEventListener('click', async e => {
@@ -1381,9 +1525,261 @@
         PR.list.push({ code, name: cloud.name || 'Player', av: cloud.av || '🧒' });
         saveProfiles(); sfx.buy();
         switchProfile(code);
-        dropBlankDefaults(code); saveProfiles();
+        dropBlankDefaults(code); saveProfiles(); accountSync();
       } catch (err) { btn.textContent = '⚠️'; shake(btn); }
     });
+    $('#chgPin').onclick = () => setPinFlow(showParent);
+    $('#resetBtn').onclick = () => $('#confirmRow').classList.remove('hidden');
+    $('#noReset').onclick = () => $('#confirmRow').classList.add('hidden');
+    $('#yesReset').onclick = () => {
+      const keep = { mute: S.mute, silly: S.silly, rev: S.rev, parent: S.parent, play: S.play };
+      S = Object.assign(fresh(), keep);
+      save(); reloadAll(); closeModal(); sync(true);
+    };
+  }
+
+  // ---------- play timer & break lock ----------
+  const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
+  const noEmoji = t => String(t).replace(/\p{Extended_Pictographic}|️|‍/gu, '').trim();
+  function say(text) {
+    if (S.mute || !window.speechSynthesis) return;
+    try {
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(noEmoji(text));
+      u.rate = 0.95; u.pitch = 1.15;
+      speechSynthesis.speak(u);
+    } catch (e) { /* no speech on this device */ }
+  }
+  function toast(text) {
+    const t = el('div', 'toast', text);
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3200);
+  }
+  function updatePlay(dt) {
+    const T = S.parent.timer, P = S.play, today = todayStr();
+    if (P.day !== today) { P.day = today; P.dayUsed = 0; P.extra = 0; if (P.lock && P.lock.type === 'day') P.lock = null; }
+    if (!T.on || !S.parent.pin) { if (P.lock) P.lock = null; return; }
+    if (P.lock || document.hidden || parentOpen) return;
+    P.used += dt; P.dayUsed += dt;
+    const left = T.minutes * 60 - P.used;
+    if (left <= 60 && !P.warned) {
+      P.warned = true;
+      toast('⏳ 1 minute left!'); say('One more minute!');
+      [784, 988].forEach((f, i) => tone(f, 0.18, 'triangle', 0.15, null, i * 0.18));
+    }
+    if (left <= 0) {
+      const tasks = T.tasks.filter(Boolean);
+      P.lock = { type: 'task', text: tasks.length ? tasks[S.parent.ti % tasks.length] : '🌈 Take a little break' };
+      S.pend = true; save(); sync();
+    } else if (T.daily && P.dayUsed >= T.daily * 60 + P.extra) {
+      P.lock = { type: 'day' };
+      S.pend = true; save(); sync();
+    }
+  }
+  let lockShown = '';
+  function renderLock() {
+    const L = S.play.lock, key = L ? L.type + ':' + (L.text || '') : '';
+    if (key === lockShown) return;
+    lockShown = key;
+    const box = $('#lock');
+    if (!L) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+    const day = L.type === 'day';
+    box.classList.remove('hidden');
+    box.innerHTML = `<div class="lockcard">
+      <div class="lk-e">${day ? '🌙' : '⏰'}</div>
+      <div class="lk-t">${day ? 'All done for today!' : esc(L.text)}</div>
+      <div class="lk-s">${day ? 'See you tomorrow 😊' : 'When you’ve done it, ask a grown-up ✅'}</div>
+      <div class="setrow" id="lkBtns"><button class="bigbtn" id="lkSay">🔊</button><button class="bigbtn can" id="lkDone">👨‍👩‍👧</button></div>
+      <div id="lkPad"></div></div>`;
+    const speak = () => say(day ? 'All done for today! See you tomorrow.' : L.text + '. When you have done it, ask a grown-up.');
+    $('#lkSay').onclick = speak;
+    setTimeout(speak, 500);
+    tone(660, 0.25, 'sine', 0.15); tone(523, 0.35, 'sine', 0.15, null, 0.25);
+    $('#lkDone').onclick = () => {
+      $('#lkBtns').classList.add('hidden');
+      pinPad($('#lkPad'), '👨‍👩‍👧 PIN', checkPin(() => {
+        if (!day) return unlockPlay(0);
+        $('#lkPad').innerHTML = `<div class="pintitle">More time today?</div><div class="setrow">
+          ${[15, 30, 60].map(m => `<button class="smallbtn" data-m="${m}">+${m} min</button>`).join('')}
+          <button class="smallbtn" data-m="0">Done for today</button></div>`;
+        document.querySelectorAll('#lkPad [data-m]').forEach(b => b.addEventListener('click', () => {
+          const m = +b.dataset.m;
+          if (!m) { lockShown = ''; $('#lkPad').innerHTML = ''; $('#lkBtns').classList.remove('hidden'); return; }
+          unlockPlay(m);
+        }));
+      }));
+    };
+  }
+  function unlockPlay(extraMin) {
+    const P = S.play;
+    if (P.lock && P.lock.type === 'task') { S.parent.ti++; P.used = 0; P.warned = false; }
+    if (extraMin) P.extra = P.dayUsed - S.parent.timer.daily * 60 + extraMin * 60;
+    P.lock = null;
+    S.pend = true; save(); sync();
+    sfx.yippee(); confetti(80);
+    lastT = performance.now();
+  }
+  function timePill() {
+    const T = S.parent.timer, pill = $('#timePill');
+    if (!T.on || !S.parent.pin || S.play.lock) { pill.classList.add('hidden'); return; }
+    const left = Math.max(0, T.minutes * 60 - S.play.used);
+    pill.classList.remove('hidden');
+    pill.textContent = '⏳ ' + (left >= 60 ? Math.ceil(left / 60) + 'm' : Math.ceil(left) + 's');
+    pill.classList.toggle('low', left <= 60);
+  }
+
+  // ---------- parent accounts (Firebase Auth; profiles list in users/{uid}) ----------
+  const FB_CFG = {
+    apiKey: FB_KEY, projectId: 'rudras-farm-game', appId: '1:610156002030:web:8ca32374b66902f4ab51ff',
+    // same-site auth handler on our own hosting keeps redirect sign-in working in Safari / home-screen apps
+    authDomain: /\.web\.app$|\.firebaseapp\.com$/.test(location.hostname) ? location.host : 'rudras-farm-game.firebaseapp.com',
+  };
+  let auth = null, user = null, authReady = null, acctCodes = [];
+  function authInit() {
+    if (!authReady) {
+      authReady = (async () => {
+        const v = '10.14.1';
+        const [appM, A] = await Promise.all([
+          import(`https://www.gstatic.com/firebasejs/${v}/firebase-app.js`),
+          import(`https://www.gstatic.com/firebasejs/${v}/firebase-auth.js`),
+        ]);
+        auth = A.initializeAuth(appM.initializeApp(FB_CFG), {
+          persistence: [A.indexedDBLocalPersistence, A.browserLocalPersistence],
+          popupRedirectResolver: A.browserPopupRedirectResolver,
+        });
+        A.onAuthStateChanged(auth, u => {
+          user = u;
+          if (u) { PR.acct = { email: u.email || '' }; saveProfiles(); accountSync(); }
+          renderAcct();
+        });
+        A.getRedirectResult(auth).catch(e => acctMsg(authError(e)));
+        return A;
+      })();
+      authReady.catch(() => { authReady = null; });
+    }
+    return authReady;
+  }
+  const USER_URL = uid => `https://firestore.googleapis.com/v1/projects/rudras-farm-game/databases/(default)/documents/users/${uid}`;
+  let acctBusy = null;
+  // merge this device's profiles with the account's: every device signed in sees every child's game
+  function accountSync(wait) {
+    if (!user) return Promise.resolve();
+    if (acctBusy) return wait ? acctBusy.then(() => accountSync()) : acctBusy;
+    acctBusy = (async () => {
+      const H = { Authorization: 'Bearer ' + await user.getIdToken(), 'Content-Type': 'application/json' };
+      const r = await fetch(USER_URL(user.uid), { headers: H, cache: 'no-store' });
+      let theirs = [];
+      if (r.ok) {
+        const f = (await r.json()).fields || {};
+        theirs = ((f.profiles && f.profiles.arrayValue.values) || []).map(x => {
+          const m = x.mapValue.fields;
+          return { code: m.code.stringValue, name: m.name.stringValue, av: m.av.stringValue };
+        }).filter(x => validCode(x.code));
+      } else if (r.status !== 404) throw new Error('account ' + r.status);
+      const cur = curProfile();
+      const wasBlank = cur.auto && !PR.list.some(x => !x.auto) && theirs.length;
+      theirs.forEach(t => { if (!PR.list.some(x => x.code === t.code)) PR.list.push(t); });
+      const mine = PR.list.filter(x => !x.auto || theirs.some(t => t.code === x.code));
+      acctCodes = mine.map(x => x.code);
+      const body = { fields: {
+        profiles: { arrayValue: { values: mine.map(x => ({ mapValue: { fields: {
+          code: { stringValue: x.code }, name: { stringValue: String(x.name).slice(0, 30) }, av: { stringValue: x.av } } } })) } },
+        updated: { integerValue: String(Date.now()) },
+      } };
+      const w = await fetch(USER_URL(user.uid), { method: 'PATCH', headers: H, body: JSON.stringify(body) });
+      if (!w.ok) throw new Error('account save ' + w.status);
+      saveProfiles();
+      if (wasBlank) { const to = theirs[0].code; switchProfile(to); dropBlankDefaults(to); saveProfiles(); }
+      renderAcct();
+    })().catch(() => { /* offline: try again later */ }).finally(() => { acctBusy = null; });
+    return acctBusy;
+  }
+  function authError(e) {
+    const c = (e && e.code) || '';
+    if (/invalid-credential|wrong-password|user-not-found|invalid-login/.test(c)) return 'Email or password is not right.';
+    if (/email-already-in-use/.test(c)) return 'That email already has an account. Tap Sign in.';
+    if (/weak-password/.test(c)) return 'Password needs at least 6 characters.';
+    if (/invalid-email/.test(c)) return 'That email doesn’t look right.';
+    if (/popup-closed|cancelled-popup/.test(c)) return '';
+    if (/network|failed to fetch/i.test(c + (e && e.message))) return 'No internet right now.';
+    if (/too-many-requests/.test(c)) return 'Too many tries. Wait a minute.';
+    return 'Something went wrong (' + (c || 'error') + ').';
+  }
+  function acctMsg(t) { const m = $('#aMsg'); if (m) m.textContent = t; }
+  function renderAcct() {
+    const box = $('#acctBox');
+    if (!box) return;
+    const state = user ? 'in:' + user.uid : 'out';
+    if (box.dataset.state === state) return; // don't wipe what a parent is typing
+    box.dataset.state = state;
+    if (user) {
+      box.innerHTML = `<p class="phint">✅ Signed in as <b>${esc(user.email || 'Google account')}</b>. All players on this device are saved to this account. Sign in on any phone, tablet or computer to get them back.</p>
+        <div class="setrow"><button class="smallbtn" id="aOut">Sign out</button></div>`;
+      $('#aOut').onclick = async () => { const A = await authInit(); await A.signOut(auth); PR.acct = null; saveProfiles(); renderAcct(); };
+      return;
+    }
+    box.innerHTML = `<p class="phint">Sign in so your child's games are never lost, even if this device is lost or wiped.</p>
+      <button class="gbtn" id="gSign"><b>G</b> Continue with Google</button>
+      <div class="or">or use email</div>
+      <input id="aEmail" class="pname" type="email" placeholder="Email" autocomplete="username">
+      <input id="aPass" class="pname" type="password" placeholder="Password (6+ characters)" autocomplete="current-password">
+      <div class="setrow"><button class="smallbtn" id="aIn">Sign in</button><button class="smallbtn" id="aUp">Create account</button></div>
+      <button class="linkbtn" id="aForgot">Forgot password?</button>
+      <div class="amsg" id="aMsg"></div>`;
+    let typed = ['', ''];
+    const run = fn => async () => {
+      typed = [$('#aEmail').value.trim(), $('#aPass').value]; // read before the sign-in library loads
+      acctMsg('🔄');
+      try { const A = await authInit(); await fn(A); acctMsg(''); } catch (e) { acctMsg(authError(e)); }
+    };
+    const creds = () => typed;
+    $('#gSign').onclick = run(async A => {
+      const prov = new A.GoogleAuthProvider();
+      prov.setCustomParameters({ prompt: 'select_account' });
+      const homeScreenIOS = (navigator.standalone || matchMedia('(display-mode: standalone)').matches) && /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && 'ontouchend' in document;
+      if (homeScreenIOS) return A.signInWithRedirect(auth, prov);
+      try { await A.signInWithPopup(auth, prov); } catch (e) {
+        if (/popup-blocked|operation-not-supported|web-storage-unsupported/.test(e.code)) return A.signInWithRedirect(auth, prov);
+        throw e;
+      }
+    });
+    $('#aIn').onclick = run(A => A.signInWithEmailAndPassword(auth, ...creds()));
+    $('#aUp').onclick = run(A => A.createUserWithEmailAndPassword(auth, ...creds()));
+    $('#aForgot').onclick = run(async A => {
+      const email = creds()[0];
+      if (!email) throw { code: 'invalid-email' };
+      await A.sendPasswordResetEmail(auth, email);
+      setTimeout(() => acctMsg('📧 Check your email for a reset link.'), 0);
+    });
+  }
+
+  // ---------- moving from the old address (GitHub Pages) to our own hosting ----------
+  const NEW_HOME = 'https://rudras-farm-game.web.app/';
+  async function moveHome() {
+    if (location.hostname !== 'anshrockz91.github.io') return;
+    openModal(`<div class="offline"><div class="oe">🚚</div><div class="ot">Moving to the game's new home…</div></div>`);
+    try {
+      save();
+      const keep = PR.list.filter(x => !x.auto);
+      for (const x of keep) { // make sure every game is safely in the cloud first
+        const st = x.code === PR.cur ? S : readJSON(saveKey(x.code));
+        if (!st) continue;
+        const cloud = await cloudGet(x.code);
+        if (!cloud || st.pend || (st.rev | 0) > cloud.rev) await cloudPut(x.code, Math.max(cloud ? cloud.rev : 0, st.rev | 0) + 1, st, x);
+      }
+      if (!keep.length) return location.replace(NEW_HOME); // nothing saved here yet
+      const cur = keep.some(x => x.code === PR.cur) ? PR.cur : keep[0].code;
+      location.replace(`${NEW_HOME}?import=${keep.map(x => x.code).join(',')}&cur=${cur}`);
+    } catch (e) {
+      closeModal(); // offline: keep playing here and try again next time
+    }
+  }
+  // games imported from a move or a share link arrive with placeholder names; fetch the real ones
+  async function fillNames() {
+    for (const x of PR.list.filter(p => p.name === '…')) {
+      try { const c = await cloudGet(x.code); if (c) { x.name = c.name || 'Player'; x.av = c.av || x.av; } } catch (e) { return; }
+    }
+    saveProfiles(); updateProfBtn();
   }
 
   // ---------- main loop ----------
@@ -1401,8 +1797,10 @@
       S.worlds.forEach((g, w) => { if (g.u && w !== S.cur) simWorld(w, bgT, S.wonders.train ? 2 : 1); });
       bgT = 0;
     }
+    updatePlay(dt);
+    renderLock();
     uiT += dt; saveT += dt;
-    if (uiT > 0.25) { uiT = 0; refreshUI(); checkAch(); }
+    if (uiT > 0.25) { uiT = 0; refreshUI(); checkAch(); timePill(); }
     if (saveT > 5) { saveT = 0; save(); }
     S.last = Date.now();
     requestAnimationFrame(tick);
@@ -1442,11 +1840,14 @@
   applyOffline();
   requestAnimationFrame(tick);
   sync();
+  if (PR.acct) authInit().catch(() => { /* offline */ });
+  fillNames();
+  moveHome();
 
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
-  window.__farm = { get S() { return S; }, get PR() { return PR; }, RT, mult, fmt, goWorld, sync, showMap, WONDERS,
+  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, goWorld, sync, showMap, WONDERS, authInit, accountSync, openGrownups,
     // test hook: render sounds into an OfflineAudioContext
     audio: { VOICES, fart, sfx, voice(n) { voiceGain = VOICE_GAIN[n] || 1; VOICES[n](); voiceGain = 1; }, useContext(ctx) { AC = ctx; OUT = ctx.destination; NOISE = null; } } }; // handy for debugging
 })();
