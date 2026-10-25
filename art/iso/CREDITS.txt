@@ -1,0 +1,5 @@
+Isometric art in this folder was rendered from 3D models by Kenney (www.kenney.nl):
+Cube Pets, Car Kit, City Kit (Suburban, Commercial, Industrial), Fantasy Town Kit,
+Survival Kit, Nature Kit and Mini Characters. License: Creative Commons Zero (CC0).
+The sheep and horse are original block models made for this game.
+Sprites are produced by tools/iso-sprites.py.

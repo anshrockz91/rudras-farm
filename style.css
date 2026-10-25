@@ -885,3 +885,46 @@ main { padding-bottom: 0; }
   background: radial-gradient(circle at 50% 100%, transparent 54%, rgba(150, 90, 255, .5) 55%, rgba(60, 130, 255, .5) 58%, rgba(60, 200, 120, .5) 61%, rgba(255, 220, 60, .5) 64%, rgba(255, 150, 50, .5) 67%, rgba(255, 70, 70, .5) 70%, transparent 71%); }
 #mapview.rainbow .bow { opacity: 1; }
 .wxicon:not(:empty) { margin-right: 4px; }
+
+/* ================= isometric farm ================= */
+.isoworld { position: relative; background: #7fbf52; }
+.iground { position: absolute; left: 0; top: 0; }
+.isp { position: absolute; pointer-events: none; user-select: none; }
+.isp.closed { filter: grayscale(.85) brightness(1.05); }
+.isp.ghost { filter: grayscale(1); opacity: .35; }
+.isp.ianimal { transition: left 1.8s ease-in-out, top 1.8s ease-in-out; animation: ihop .5s ease-in-out infinite alternate; }
+.isp.ianimal.flip { transform: scaleX(-1); }
+.isp.ianimal.flip { animation-name: ihopf; }
+@keyframes ihop { from { translate: 0 0; } to { translate: 0 -5px; } }
+@keyframes ihopf { from { translate: 0 0; } to { translate: 0 -5px; } }
+.isp.iworker { animation: iwork 6s ease-in-out infinite alternate; }
+@keyframes iwork { from { translate: 0 0; } to { translate: 120px 60px; } }
+.isp.idrive { animation: idrive 16s linear infinite; }
+.isp.idrive.back { animation-delay: -8s; }
+@keyframes idrive { from { transform: translate(0, 0); } to { transform: translate(var(--dx), var(--dy)); } }
+.isp.iwalk { animation: iwalk linear infinite; }
+@keyframes iwalk { from { transform: translate(0, 0) scaleX(-1); } to { transform: translate(var(--dx), var(--dy)) scaleX(-1); } }
+.iwindmill { position: absolute; pointer-events: none; background: url(art/iso/windmill.png) 0 0 no-repeat; animation: iblades .9s steps(6) infinite; }
+@keyframes iblades { to { background-position: calc(var(--fw) * -6) 0; } }
+.ihit { position: absolute; background: transparent; z-index: 2000; }
+.ihit.focus { background: rgba(255, 216, 77, .35); animation: blink 1s steps(2) infinite; }
+.ihit.next { background: rgba(255, 216, 77, .25); }
+.isign { position: absolute; width: 92px; display: flex; flex-direction: column; align-items: center; background: #fff; border-radius: 16px; padding: 4px 2px 3px; box-shadow: 0 5px 0 rgba(0, 0, 0, .15); }
+.isign::after { content: ''; position: absolute; bottom: -10px; left: 50%; margin-left: -10px; border: 10px solid transparent; border-top-color: #fff; border-bottom: 0; }
+.isign span { font-size: 34px; line-height: 1; }
+.isign b { font-size: 22px; font-weight: 400; margin-top: -4px; }
+.isign i { font-style: normal; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.isign.closed { opacity: .7; filter: grayscale(.6); }
+.isign.now { background: #fff8d6; animation: glow 1.2s infinite; }
+.ilabel { position: absolute; transform: translateX(-50%); background: rgba(255, 255, 255, .92); border-radius: 999px; padding: 1px 10px; font-size: 15px; font-weight: 700; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 0 rgba(0, 0, 0, .12); }
+.ilabel.penl { font-size: 17px; }
+.ibadge { position: absolute; background: #fff; border-radius: 999px; padding: 1px 10px; font-size: 18px; font-weight: 700; box-shadow: 0 2px 0 rgba(0, 0, 0, .15); pointer-events: none; }
+.iplus { position: absolute; width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 34px; font-weight: 700; color: #fff; background: rgba(0, 0, 0, .12); pointer-events: none; }
+.iplus.can { background: #ffc83d; animation: glow 1.2s infinite; }
+.ipenlock { position: absolute; width: 120px; display: flex; flex-direction: column; align-items: center; pointer-events: none; font-size: 40px; }
+.ipenlock b { font-size: 18px; background: #fff; border-radius: 999px; padding: 0 10px; }
+.ipenlock.next span { animation: bob .6s infinite alternate; }
+.dname.iso { position: absolute; left: 50%; bottom: 14px; top: auto; z-index: 2100; }
+.isomap .dsky .cloud { animation-name: idrift; }
+@keyframes idrift { from { transform: translateX(-260px); } to { transform: translateX(var(--skyW, 1150px)); } }
+#mapview.night .isp:not(.ianimal) { filter: brightness(.85); }

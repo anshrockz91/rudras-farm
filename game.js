@@ -1222,7 +1222,7 @@
       st.x = vw() / 2 - wx * st.s; st.y = vh() / 2 - wy * st.s;
       apply();
     }
-    if (fresh) { st.s = Math.max(fit(), Math.min(1, vw() / (W === CW ? 800 : W))); centerOn(W / 2, H / 2); }
+    if (fresh) { st.s = W === IW ? fit() * 1.6 : Math.max(fit(), Math.min(1, vw() / (W === CW ? 800 : W))); centerOn(W / 2, W === IW ? H * 0.58 : H / 2); }
     pz = { st, apply, zoomAt, centerOn, W, H };
     apply();
     return pz;
@@ -1380,6 +1380,150 @@
       ${extra}${deco}<div class="dstreet">${car}</div>${shops}${mini ? '' : shoppers(w)}${slots}${pens}${mini || w > 1 ? '' : '<span class="fly1">🦋</span><span class="fly1 b2">🦋</span>'}
       ${mini ? '' : `<div class="dname">${D.icon} ${esc(g.b[5] ? D.done : D.title)}</div>`}</div>`;
   }
+  // ---------- isometric farm (Kenney CC0 art rendered from 3D, see tools/iso-sprites.py) ----------
+  let ISO = null; // sprite sizes/anchors, loaded from art/iso/meta.json
+  fetch('art/iso/meta.json').then(r => r.json()).then(m => { ISO = m; if (view === 'district' && S.cur === 0 && openK < 0) renderCurrent(); }).catch(() => { /* old look */ });
+  const TW = 128, TH = 64, IGX = 16, IGY = 18, IOX = IGY * TW / 2, IOY = 270;
+  const IW = (IGX + IGY) * TW / 2, IH = (IGX + IGY) * TH / 2 + IOY + 60;
+  const isoXY = (gx, gy) => [IOX + (gx - gy) * TW / 2, IOY + (gx + gy) * TH / 2];
+  const ISO_SLOTS = [[1, 5], [4, 5], [7, 5], [10, 5], [1, 8], [4, 8], [7, 8], [10, 8]]; // 2x2 plots (top corner)
+  const ISO_PENS = [[1, 12], [6, 12], [11, 12], [1, 15], [6, 15], [11, 15]];           // 3x3 paddocks
+  const ISO_HOUSES = [1, 3, 5, 7, 9, 11, 13];                                         // shop street, row gy=1
+  const PEN_ANIMAL = ['chick', 'cow', 'sheep', 'pig', 'bee', 'horse'];
+  const FARM_BUILD = ['coop', 'barn', 'farmhouse', 'shop', 'factory', 'company'];
+  // one sprite, standing on ground point (gx, gy)
+  function spr(name, gx, gy, opt = {}) {
+    const m = ISO[name]; if (!m) return '';
+    const [x, y] = isoXY(gx, gy);
+    const z = Math.round((gx + gy) * 10) + (opt.z || 0);
+    return `<img class="isp${opt.cls ? ' ' + opt.cls : ''}" src="art/iso/${name}.png" alt="" draggable="false"
+      style="left:${(x - m.ax).toFixed(1)}px;top:${(y - m.ay).toFixed(1)}px;width:${m.w}px;height:${m.h}px;z-index:${z}${opt.style || ''}"${opt.attrs || ''}>`;
+  }
+  // a tappable diamond covering w x h tiles from top corner (gx, gy)
+  function hit(gx, gy, w, h, attrs, cls) {
+    const [x0] = isoXY(gx, gy + h), [x1] = isoXY(gx + w, gy), [, y0] = isoXY(gx, gy), [, y1] = isoXY(gx + w, gy + h);
+    const [tx] = isoXY(gx, gy), [, ly] = isoXY(gx, gy + h), [, ry] = isoXY(gx + w, gy);
+    const W = x1 - x0, H = y1 - y0;
+    const pts = [[(tx - x0) / W, 0], [1, (ry - y0) / H], [((isoXY(gx + w, gy + h)[0]) - x0) / W, 1], [0, (ly - y0) / H]]
+      .map(([a, b]) => `${(a * 100).toFixed(1)}% ${(b * 100).toFixed(1)}%`).join(',');
+    return `<button class="ihit ${cls || ''}" ${attrs} style="left:${x0}px;top:${y0}px;width:${W}px;height:${H}px;clip-path:polygon(${pts})"></button>`;
+  }
+  function isoGround(kind) {
+    const polys = [];
+    const tile = (gx, gy, fill, stroke) => {
+      const p = [isoXY(gx, gy), isoXY(gx + 1, gy), isoXY(gx + 1, gy + 1), isoXY(gx, gy + 1)].map(([x, y]) => `${x},${y}`).join(' ');
+      polys.push(`<polygon points="${p}" fill="${fill}"${stroke ? ` stroke="${stroke}" stroke-width="1"` : ''}/>`);
+    };
+    for (let gy = 0; gy < IGY; gy++) for (let gx = 0; gx < IGX; gx++) {
+      const k = kind(gx, gy);
+      tile(gx, gy, k.fill || ((gx + gy) % 2 ? '#93d35f' : '#8ccb58'), k.stroke);
+    }
+    return `<svg class="iground" width="${IW}" height="${IH}" viewBox="0 0 ${IW} ${IH}">${polys.join('')}</svg>`;
+  }
+  function isoFarm() {
+    const w = 0, D = WD[w], g = S.worlds[w], sl = S.map.slots.w0 || {};
+    const inSlot = {}; Object.keys(sl).forEach(b => { inSlot[sl[b]] = +b; });
+    const next = g.b.indexOf(false), nextLane = g.lanes.findIndex(L => !L.u);
+    const inRect = (gx, gy, [x, y], w2, h2) => gx >= x && gx < x + w2 && gy >= y && gy < y + h2;
+    const ground = isoGround((gx, gy) => {
+      if (gy === 1 || gy === 2) return { fill: (gx % 2) ? '#e6dfcf' : '#ddd5c2' };                // shop street
+      if (gy === 3 || gy === 11 || gx === 0 && gy > 3 && gy < 11) return { fill: (gx + gy) % 2 ? '#d8b98a' : '#d2b282' }; // dirt roads
+      for (let s = 0; s < 8; s++) if (inRect(gx, gy, ISO_SLOTS[s], 2, 2)) return { fill: inSlot[s] != null ? '#c9b48c' : '#b7d98f', stroke: inSlot[s] != null ? null : 'rgba(255,255,255,.7)' };
+      for (let k = 0; k < 6; k++) if (inRect(gx, gy, ISO_PENS[k], 3, 3)) return { fill: g.lanes[k].u ? D.lanes[k].dirt : '#cfcabb' };
+      return {};
+    });
+    let html = ground;
+    // shop street: townspeople's houses with a sign showing what they sell
+    const shops = QUESTS.filter(q => q.shop && questDistrict(q) === w);
+    shops.forEach((q, i) => {
+      const gx = ISO_HOUSES[i] + 0.5, gy = 1.2, isNow = activeQuest() === q, st = helpedQuest(q) ? 'open' : isNow ? 'now' : 'closed';
+      html += spr('house' + (i % 7), gx, gy, { cls: st === 'open' ? '' : 'closed' });
+      const [x, y] = isoXY(gx, gy);
+      html += `<button class="isign ${st}" data-shop="${q.id}" style="left:${x - 46}px;top:${y - 190}px;z-index:${Math.round((gx + gy) * 10) + 400}">
+        <span>${st === 'open' ? q.shop[0] : '💤'}</span><b>${face(q.who)}${st === 'now' ? '❗' : ''}</b><i>${st === 'open' ? esc(q.shop[1]) : esc(PEOPLE[q.who].name)}</i></button>`;
+    });
+    // building plots
+    ISO_SLOTS.forEach(([sx, sy], s) => {
+      const b = inSlot[s];
+      if (b != null) {
+        html += spr(FARM_BUILD[b], sx + 1, sy + 1, { z: 2 });
+        const [x, y] = isoXY(sx + 1, sy + 2);
+        html += `<span class="ilabel" style="left:${x}px;top:${y - 18}px;z-index:${Math.round((sx + sy + 3) * 10) + 300}">${esc(D.build[b].n)}</span>`;
+      } else {
+        const can = next >= 0 && g.coins >= D.build[next].cost;
+        const [x, y] = isoXY(sx + 1, sy + 1);
+        html += `<span class="iplus${can ? ' can' : ''}" data-plus="${s}" style="left:${x - 24}px;top:${y - 30}px;z-index:${Math.round((sx + sy + 2) * 10)}">＋</span>`;
+      }
+      html += hit(sx, sy, 2, 2, `data-slot="${s}"`, b != null ? 'built' : 'empty');
+    });
+    // paddocks with fences, animals, the stall and the farm worker
+    ISO_PENS.forEach(([px, py], k) => {
+      const L = g.lanes[k], A = D.lanes[k];
+      for (let i = 0; i < 3; i++) {
+        html += spr('fence_x', px + i + 0.5, py, { z: -3 });
+        if (i !== 1) html += spr('fence_x', px + i + 0.5, py + 3, { z: 1 }); // gap = gate
+        html += spr('fence_y', px, py + i + 0.5, { z: -3 });
+        html += spr('fence_y', px + 3, py + i + 0.5, { z: 1 });
+      }
+      const [cx, cy] = isoXY(px + 1.5, py + 1.5);
+      if (!L.u) {
+        const isNext = k === nextLane, P = D.lanes[k - 1];
+        html += spr(PEN_ANIMAL[k], px + 1.5, py + 1.5, { cls: 'ghost' });
+        html += `<div class="ipenlock${isNext ? ' next' : ''}" style="left:${cx - 60}px;top:${cy - 40}px;z-index:900"><span>🔒</span>${isNext ? `<b data-goal="${k}">${P.p} ${Math.min(g.lanes[k - 1].sold, A.unlock.need)}/${A.unlock.need}</b>` : ''}</div>`;
+      } else {
+        for (let i = 0; i < Math.min(L.n, 5); i++) {
+          const ax = px + 0.6 + (i * 0.77) % 1.8, ay = py + 0.6 + ((i * 1.3) % 1.8);
+          html += spr(PEN_ANIMAL[k], ax, ay, { cls: 'ianimal', attrs: ` data-pen0="${px},${py}"` });
+        }
+        html += spr('stall_pen', px + 2.6, py + 2.4, { z: 4 });
+        if (L.cash) html += spr('seller', px + 2.3, py + 2.55, { z: 5 });
+        if (L.col) html += spr('farmer', px + 0.5, py + 2.5, { cls: 'iworker', z: 6 });
+        html += `<span class="ibadge" data-penk="${k}" style="left:${cx + 40}px;top:${cy - 95}px;z-index:950">${A.p} ${fmt(Math.floor(L.g))}</span>`;
+        html += `<span class="ilabel penl" style="left:${cx}px;top:${cy + 56}px;z-index:950">${A.a} ${fmt(L.sold)}</span>`;
+      }
+      html += hit(px, py, 3, 3, `data-pen="${k}"`, L.u ? '' : 'locked' + (k === nextLane ? ' next' : ''));
+    });
+    // scenery
+    const deco = [['windmill', 13.6, 6.2], ['watertower', 14.3, 9.2], ['tree1', 0.4, 0.3], ['tree2', 15.3, 0.6], ['tree1', 15.4, 4.5], ['tree3', 0.3, 12.3],
+      ['tree2', 15.5, 12.6], ['tree1', 15.3, 16.5], ['tree3', 4.8, 13.4], ['tree1', 9.8, 16.4], ['tree2', 0.5, 17.4], ['bush', 3.5, 7.4], ['bush', 9.5, 7.5],
+      ['pumpkins', 12.6, 8.6], ['crates', 13, 10.3], ['logs', 6.5, 10.4], ['barrel', 12.4, 4.3], ['cart', 14.5, 2.7], ['corn', 12.5, 11.6], ['wheat', 13.6, 11.5],
+      ['flowers', 3.4, 4.3], ['flowers', 9.5, 10.3], ['rock', 15.3, 14.3], ['signpost', 0.5, 4.4], ['lantern', 0.6, 2.6], ['lantern', 15.4, 2.6]];
+    deco.forEach(([n, gx, gy]) => {
+      if (n === 'windmill') {
+        const m = ISO.windmill, [x, y] = isoXY(gx, gy);
+        html += `<div class="iwindmill" style="left:${x - m.ax}px;top:${y - m.ay}px;width:${m.w}px;height:${m.h}px;background-size:${m.w * m.frames}px ${m.h}px;--fw:${m.w}px;z-index:${Math.round((gx + gy) * 10)}"></div>`;
+      } else html += spr(n, gx, gy);
+    });
+    // traffic and shoppers
+    const tier = Math.max(...g.lanes.map(L => L.truck)), veh = tier >= 4 ? 'delivery' : tier ? 'pickup' : 'tractor';
+    const [rx0, ry0] = isoXY(-1, 3.5), [rx1, ry1] = isoXY(IGX + 1, 3.5);
+    const vm = ISO[veh + '_r'];
+    html += `<img class="isp idrive" src="art/iso/${veh}_r.png" alt="" style="left:${rx0 - vm.ax}px;top:${ry0 - vm.ay}px;width:${vm.w}px;height:${vm.h}px;--dx:${rx1 - rx0}px;--dy:${ry1 - ry0}px;z-index:60">`;
+    const vb = ISO[veh + '_l'];
+    html += `<img class="isp idrive back" src="art/iso/${veh}_l.png" alt="" style="left:${rx1 - vb.ax}px;top:${ry1 - vb.ay - 18}px;width:${vb.w}px;height:${vb.h}px;--dx:${rx0 - rx1}px;--dy:${ry0 - ry1}px;z-index:55">`;
+    const open = shops.filter(helpedQuest).length;
+    for (let i = 0; i < Math.min(3, open); i++) {
+      const sm = ISO['shopper' + (1 + i % 2)], [sx0, sy0] = isoXY(-0.5, 2.5), [sx1, sy1] = isoXY(IGX + 0.5, 2.5);
+      html += `<img class="isp iwalk" src="art/iso/shopper${1 + i % 2}.png" alt="" style="left:${sx0 - sm.ax}px;top:${sy0 - sm.ay}px;width:${sm.w}px;height:${sm.h}px;--dx:${sx1 - sx0}px;--dy:${sy1 - sy0}px;animation-duration:${26 + i * 7}s;animation-delay:-${i * 9}s;z-index:45">`;
+    }
+    return `<div class="isoworld" style="width:${IW}px;height:${IH}px">${html}<div class="dname iso">${D.icon} ${esc(g.b[5] ? D.done : D.title)}</div></div>`;
+  }
+  // animals wander around inside their paddocks
+  setInterval(() => {
+    if (view !== 'district' || openK >= 0 || !$('#mapworld .isoworld')) return;
+    const all = mapWorld.querySelectorAll('.ianimal');
+    if (!all.length) return;
+    const a = all[Math.floor(Math.random() * all.length)];
+    const [px, py] = a.dataset.pen0.split(',').map(Number), name = a.src.split('/').pop().replace('.png', ''), m = ISO[name];
+    const gx = px + 0.5 + Math.random() * 2, gy = py + 0.5 + Math.random() * 2;
+    const [x, y] = isoXY(gx, gy);
+    const oldLeft = parseFloat(a.style.left);
+    a.classList.toggle('flip', x - m.ax > oldLeft); // sprites face down-left; mirror when heading right
+    a.style.left = (x - m.ax).toFixed(1) + 'px';
+    a.style.top = (y - m.ay).toFixed(1) + 'px';
+    a.style.zIndex = Math.round((gx + gy) * 10);
+  }, 900);
+
   // people walk along the shop street, pop into an open shop and come out with a bag
   function shoppers(w) {
     const open = QUESTS.filter(q => q.shop && questDistrict(q) === w).map((q, i) => helpedQuest(q) ? i : -1).filter(i => i >= 0);
@@ -1394,19 +1538,23 @@
       + '<div class="birds"><i>🐦</i><i>🐦</i><i>🐦</i></div>';
   }
   function renderDistrictMap(focus) {
-    usePZ('w' + S.cur, DW, DH);
+    const iso = S.cur === 0 && ISO;  // the farm has the new isometric look
+    usePZ(iso ? 'iso0' : 'w' + S.cur, iso ? IW : DW, iso ? IH : DH);
     $('#mapbannerHost').innerHTML = '';
-    mapWorld.className = 'district';
-    mapWorld.innerHTML = districtScene(S.cur, false) + '<div class="dsky">' + skyLife() + '</div><div class="nightveil"></div>';
-    mapWorld.querySelectorAll('.mpen').forEach(b => b.addEventListener('click', () => penTap(+b.dataset.pen, b)));
-    mapWorld.querySelectorAll('.mslot').forEach(b => b.addEventListener('click', () => slotTap(+b.dataset.slot, b)));
-    mapWorld.querySelectorAll('.mshop').forEach(b => b.addEventListener('click', () => shopTap(b.dataset.shop, b)));
+    mapWorld.className = iso ? 'district isomap' : 'district';
+    mapWorld.innerHTML = (iso ? isoFarm() : districtScene(S.cur, false)) + `<div class="dsky"${iso ? ` style="--skyW:${IW}px"` : ''}>` + skyLife() + '</div><div class="nightveil"></div>';
+    mapWorld.querySelectorAll('[data-pen]').forEach(b => b.addEventListener('click', () => penTap(+b.dataset.pen, b)));
+    mapWorld.querySelectorAll('[data-slot]').forEach(b => b.addEventListener('click', () => slotTap(+b.dataset.slot, b)));
+    mapWorld.querySelectorAll('[data-shop]').forEach(b => b.addEventListener('click', () => shopTap(b.dataset.shop, b)));
     if (focus && focus.pen != null) {
-      const [x, y] = PEN_POS[focus.pen];
+      const [x, y] = iso ? isoXY(ISO_PENS[focus.pen][0] + 1.5, ISO_PENS[focus.pen][1] + 1.5) : PEN_POS[focus.pen];
       pz.centerOn(x, y);
       const p = $(`#mapworld [data-pen="${focus.pen}"]`); if (p) p.classList.add('focus');
     }
-    if (focus && focus.slots) { mapWorld.querySelectorAll('.mslot.empty').forEach(s => s.classList.add('focus')); pz.centerOn(DW / 2, 320); }
+    if (focus && focus.slots) {
+      mapWorld.querySelectorAll('.mslot.empty, .ihit.empty').forEach(s => s.classList.add('focus'));
+      if (iso) { const [x, y] = isoXY(7, 7); pz.centerOn(x, y); } else pz.centerOn(DW / 2, 320);
+    }
     dayNight();
   }
   function shopTap(id, b) {
@@ -1547,7 +1695,7 @@
         if (gl) gl.textContent = `${ANIMALS[k - 1].p} ${Math.min(G.lanes[k - 1].sold, ANIMALS[k].unlock.need)}/${ANIMALS[k].unlock.need}`;
       });
       const next = G.b.indexOf(false), can = next >= 0 && G.coins >= BUILD[next].cost;
-      mapWorld.querySelectorAll('.mslot.empty').forEach(s => s.classList.toggle('can', can));
+      mapWorld.querySelectorAll('.mslot.empty, .iplus').forEach(s => s.classList.toggle('can', can));
     }
     updateTips();
   }
