@@ -21,17 +21,16 @@
 <body>
 <header id="top">
   <button id="profBtn" class="round prof" aria-label="Profile"><span id="profAv">🧒</span><i id="syncDot">🔄</i></button>
-  <div id="coinPill" class="pill"><span>💰</span><b id="coins">0</b></div>
+  <div id="coinPill" class="pill"><span id="coinWorld">🚜</span><span>💰</span><b id="coins">0</b></div>
   <button id="starBtn" class="pill" aria-label="Stars"><span>⭐</span><b id="stars">0</b></button>
   <button id="setBtn" class="round" aria-label="Settings">⚙️</button>
 </header>
 <main>
-  <nav id="worlds" class="worlds"></nav>
+  <nav id="navbar" class="navbar"></nav>
   <button id="quest" class="quest hidden" aria-label="Current quest"></button>
-  <section id="city" class="city"></section>
-  <section id="buildings" class="card farmcard"></section>
-  <div id="lanes"></div>
 </main>
+<div id="mapview"><div id="mapworld"></div><div id="mapbannerHost"></div></div>
+<div id="laneView" class="hidden"><div class="lvbar"><button id="lvBack" class="navback">⬅️</button><span id="lvTitle"></span></div><div id="lanes"></div></div>
 <div id="timePill" class="timepill hidden"></div>
 <div id="lock" class="hidden"></div>
 <div id="dlg" class="hidden"></div>

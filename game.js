@@ -115,6 +115,7 @@
   const parentDefaults = () => ({ pin: null, salt: '', ti: 0, timer: { on: false, minutes: 15, daily: 0, tasks: DEFAULT_TASKS.slice() } });
   const storyDefaults = () => ({ q: 0, done: {}, intro: false, finale: false });
   const cityDefaults = () => ({ cars: {}, ride: '', food: {}, visitors: {}, rescues: 0, hi: {} });
+  const mapDefaults = () => ({ places: {}, slots: {}, wslots: {} });
   const playDefaults = () => ({ used: 0, day: '', dayUsed: 0, extra: 0, warned: false, lock: null });
   function freshWorld(w) {
     return {
@@ -124,7 +125,7 @@
     };
   }
   function fresh() {
-    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, parent: parentDefaults(), play: playDefaults(), story: storyDefaults(), city: cityDefaults(), mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
+    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, parent: parentDefaults(), play: playDefaults(), story: storyDefaults(), city: cityDefaults(), map: mapDefaults(), mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
   }
   function mergeWorld(w, d) {
     const g = freshWorld(w);
@@ -209,6 +210,7 @@
     base.play = Object.assign(playDefaults(), d.play || {});
     base.story = Object.assign(storyDefaults(), d.story || {});
     base.city = Object.assign(cityDefaults(), d.city || {});
+    base.map = Object.assign(mapDefaults(), d.map || {});
     base.rev = d.rev | 0;
     base.pend = !!d.pend;
     if (d.last) base.last = d.last;
@@ -815,39 +817,167 @@
     return sec;
   }
 
-  function renderLanes() {
-    laneWrap.innerHTML = '';
+  // ---------- navigation: city map -> district map -> business ----------
+  let view = 'city';   // 'city' | 'district'
+  let openK = -1;      // lane open in the business view, or -1
+  const laneView = $('#laneView');
+  function renderLanes() { if (openK >= 0) openLane(openK, true); }
+  function openLane(k, keep) {
+    const L = G.lanes[k];
+    if (!L || !L.u) return;
+    if (!keep) resetRT();
     RT.forEach(R => { R.el = null; });
-    lockEl = null;
-    G.lanes.forEach((L, k) => { if (L.u) laneWrap.appendChild(buildLane(k)); });
-    const next = G.lanes.findIndex(L => !L.u);
-    if (next > 0) { lockEl = buildLock(next); laneWrap.appendChild(lockEl); }
-    const nw = S.cur + 1;
-    if (next < 0 && WD[nw] && S.worlds[nw].u) {
-      const card = el('section', 'card nextworld', `<div class="nw-e">${WD[nw].icon}</div><button class="bigbtn can">➡️ ${WD[nw].icon}</button>`);
-      card.querySelector('.bigbtn').addEventListener('click', () => goWorld(nw));
-      laneWrap.appendChild(card);
-    }
+    openK = k;
+    laneWrap.innerHTML = '';
+    laneWrap.appendChild(buildLane(k));
+    $('#lvTitle').innerHTML = `${WD[S.cur].icon} ${ANIMALS[k].a} ${ANIMALS[k].p}`;
+    laneView.classList.remove('hidden');
+    if (!keep) laneView.scrollTop = 0;
+    shownCoins = -1; refreshUI();
+  }
+  function closeLane(quiet) {
+    if (openK < 0) return;
+    openK = -1;
+    RT.forEach(R => { R.el = null; });
+    laneWrap.innerHTML = '';
+    laneView.classList.add('hidden');
+    if (!quiet) { renderCurrent(); shownCoins = -1; refreshUI(); }
+  }
+  $('#lvBack').addEventListener('click', () => { ac(); sfx.pop(); closeLane(); });
+
+  function renderNav() {
+    const nav = $('#navbar'), D = WD[S.cur];
+    nav.innerHTML = view === 'city'
+      ? `<span class="navtitle"><span class="skyicon">☀️</span> ${esc(townName())}</span><span class="navhint">${needPlacing().length ? '📍' : '👆'}</span>`
+      : `<button class="navback" id="navBack">⬅️ 🏙️</button><span class="navtitle">${D.icon} ${esc(G.b[5] ? D.done : D.title)}</span>`;
+    const b = $('#navBack');
+    if (b) b.onclick = () => { ac(); sfx.pop(); setView('city'); };
+    refreshMapBtn();
+    layoutMap();
+  }
+  function setView(v, focus) {
+    if (openK >= 0) closeLane(true);
+    view = v;
+    renderNav();
+    renderCurrent(focus);
+    shownCoins = -1; refreshUI();
+  }
+  function renderCurrent(focus) { if (view === 'city') renderCityMap(focus); else renderDistrictMap(focus); }
+  function renderCity() { renderCurrent(); }   // older call sites
+  function openDistrict(w, focus) {
+    ac();
+    if (!S.worlds[w] || !S.worlds[w].u) return;
+    if (!placed('w' + w)) { setView('city'); return; } // choose where it goes first
+    if (w !== S.cur) { S.cur = w; S.seen[w] = true; bindWorld(); resetRT(); applyTheme(); save(); }
+    sfx.buy(); buzz(20);
+    setView('district', focus);
+  }
+  const goWorld = (w, focus) => openDistrict(w, focus);
+  function applyTheme() {
+    const D = WD[S.cur], r = document.documentElement.style;
+    D.bg.forEach((c, i) => r.setProperty('--bg' + (i + 1), c));
+    r.setProperty('--wood', D.fence[0]);
+    r.setProperty('--wood2', D.fence[1]);
   }
 
-  // ---------- worlds ----------
-  const mapEl = $('#worlds');
-  function renderMap() {
-    mapEl.innerHTML = '';
-    WD.forEach((D, w) => {
-      const g = S.worlds[w];
-      const icon = g.u || !D.wonder ? D.icon : '❓'; // the secret world stays a mystery
-      const b = el('button', 'wbub' + (w === S.cur && view === 'world' ? ' cur' : '') + (g.u ? '' : ' locked') + (g.u && !S.seen[w] ? ' new' : ''),
-        `<span class="wi">${icon}</span><span class="wc">${g.u ? fmt(g.coins) : '🔒'}</span>`);
-      b.addEventListener('click', () => g.u ? goWorld(w) : shake(b));
-      mapEl.appendChild(b);
-    });
-    const m = el('button', 'wbub mapbtn' + (view === 'city' ? ' cur' : ''), `<span class="wi">🏙️</span><span class="wc"></span>`);
-    m.addEventListener('click', () => { ac(); sfx.pop(); setView('city'); });
-    mapEl.appendChild(m);
-    refreshMapBtn();
+  // ---------- placing things on the maps ----------
+  const placed = key => S.map.places[key] != null;
+  const placeIcon = key => (key === 'garage' ? '🚗' : key === 'food' ? '🍽️' : WD[+key.slice(1)].icon);
+  const placeName = key => (key === 'garage' ? 'Garage' : key === 'food' ? 'Food Street' : WD[+key.slice(1)].title);
+  function openedPlaces() {
+    const out = [];
+    S.worlds.forEach((g, w) => { if (g.u) out.push('w' + w); });
+    if (garageOpen()) out.push('garage');
+    if (foodOpen()) out.push('food');
+    return out;
   }
-  // ---------- wonders ----------
+  const needPlacing = () => openedPlaces().filter(k => !placed(k));
+  const freePlots = () => Object.keys(PLOTS).filter(p => !Object.values(S.map.places).includes(p));
+  const slotsOf = w => (S.map.slots['w' + w] = S.map.slots['w' + w] || {});
+  // games saved before the map existed: put everything already unlocked somewhere sensible
+  function autoPlaceLegacy() {
+    const pref = { w0: 'p1', w1: 'p2', w2: 'p4', w3: 'p5', w4: 'p6', garage: 'p8', food: 'p3' };
+    const brandNew = !S.story.intro && progress(S) === 0;
+    needPlacing().forEach(key => {
+      if (key === 'w0' && brandNew) return; // a new player chooses the farm's spot
+      const free = freePlots();
+      if (free.length) S.map.places[key] = free.includes(pref[key]) ? pref[key] : free[0];
+    });
+    S.worlds.forEach((g, w) => {
+      const sl = slotsOf(w), used = () => Object.values(sl);
+      g.b.forEach((own, i) => {
+        if (own && sl[i] == null) { const f = [0, 1, 2, 3, 4, 5, 6, 7].find(x => !used().includes(x)); if (f != null) sl[i] = f; }
+      });
+    });
+    WONDERS.forEach(x => {
+      if (S.wonders[x.id] && S.map.wslots[x.id] == null) {
+        const f = [0, 1, 2, 3, 4].find(i => !Object.values(S.map.wslots).includes(i));
+        if (f != null) S.map.wslots[x.id] = f;
+      }
+    });
+  }
+  // a little building site: crane, dust and hammering, then the thing appears
+  function construct(sel, done) {
+    const t = $('#mapworld ' + sel);
+    if (!t) { done(); return; }
+    const site = el('div', 'site', '<span>🏗️</span><span>🚧</span><i>💨</i><i>💨</i><i>💨</i>');
+    t.appendChild(site);
+    [0, 0.3, 0.6, 0.9, 1.2, 1.5].forEach(d => { noise({ dur: 0.06, vol: 0.3, filt: 'lowpass', ff: [[0, 700]], delay: d }); tone(170, 0.08, 'square', 0.08, 120, d); });
+    setTimeout(() => { done(); sfx.partyHorn(); confetti(80); }, 1900);
+  }
+  function placeHere(plot, key) {
+    S.map.places[key] = plot; S.pend = true; save();
+    construct(`[data-plot="${plot}"]`, () => {
+      renderNav(); renderCurrent({ plot }); toast(`${placeIcon(key)} ${placeName(key)}!`);
+      // the very first farm: walk straight in and start
+      if (key === 'w0' && !G.lanes[0].sold) setTimeout(() => openDistrict(0, { pen: 0 }), 900);
+    });
+  }
+
+  // ---------- buildings inside a district ----------
+  function showBuildSheet(slot) {
+    const next = G.b.indexOf(false);
+    if (next < 0) { toast('✅ 🏗️'); return; }
+    const b = BUILD[next], can = G.coins >= b.cost;
+    openModal(`<div class="wonderbox"><div class="wbig built">${b.e}</div><h2>${esc(b.n)}</h2><div class="wfx">${b.fx}</div>
+      <div class="chips"><span class="chip ${can ? 'ok' : 'no'}">${WD[S.cur].icon} 💰${fmt(b.cost)} ${can ? '✅' : '❌'}</span></div>
+      <button class="bigbtn${can ? ' can' : ''}" id="bBuild">🔨 ${b.e}</button></div>`);
+    $('#bBuild').onclick = e => buildBuildingAt(next, slot, e.currentTarget);
+  }
+  function buildBuildingAt(i, slot, btn) {
+    ac();
+    if (G.coins < BUILD[i].cost) return shake(btn);
+    G.coins -= BUILD[i].cost; G.b[i] = true;
+    slotsOf(S.cur)[i] = slot;
+    S.pend = true; save(); closeModal();
+    construct(`[data-slot="${slot}"]`, () => {
+      renderCurrent(); renderNav(); shownCoins = -1; refreshUI();
+      celebrate(BUILD[i].e, 0, i === 5 ? WD[S.cur].done + '!' : BUILD[i].fx);
+      if (i === 5) setTimeout(() => confetti(260), 600);
+    });
+  }
+  function slotTap(slot, btn) {
+    ac();
+    const i = Object.keys(slotsOf(S.cur)).find(b => slotsOf(S.cur)[b] === slot);
+    if (i == null) return showBuildSheet(slot);
+    btn.classList.remove('wiggle'); void btn.offsetWidth; btn.classList.add('wiggle');
+    sfx.boing(); toast(`${BUILD[i].e} ${BUILD[i].fx}`);
+  }
+  function penTap(k, btn) {
+    ac();
+    const L = G.lanes[k];
+    if (L.u) { sfx.pop(); laneVoice(k, true); openLane(k); return; }
+    if (k === G.lanes.findIndex(x => !x.u)) {
+      openModal('<div id="unlockBox"></div>');
+      lockEl = buildLock(k);
+      $('#unlockBox').appendChild(lockEl);
+      refreshUI();
+      return;
+    }
+    shake(btn);
+  }
+
+  // ---------- wonders (built on the Town Square plots) ----------
   const wonderBuilt = x => !!S.wonders[x.id];
   function needMet(x) {
     const i = WONDERS.indexOf(x);
@@ -857,22 +987,27 @@
   const canPay = x => x.cost.every(([w, c]) => S.worlds[w].coins >= c);
   const wonderReady = x => !wonderBuilt(x) && needMet(x) && canPay(x);
   function refreshMapBtn() {
-    const m = mapEl.querySelector('.mapbtn'); if (!m) return;
-    m.lastChild.textContent = '😊 ' + Object.keys(S.story.done).length;
-    m.classList.toggle('new', WONDERS.some(wonderReady));
+    const b = $('#navBack');
+    if (b) b.classList.toggle('new', WONDERS.some(wonderReady) || needPlacing().length > 0);
   }
-  function buildWonder(x, btn) {
+  function freeWonderSlot() { return [0, 1, 2, 3, 4].find(i => !Object.values(S.map.wslots).includes(i)); }
+  function buildWonder(x, btn, slot) {
     ac();
     if (!wonderReady(x)) return shake(btn);
     x.cost.forEach(([w, c]) => { S.worlds[w].coins -= c; });
     S.wonders[x.id] = Date.now();
-    unlockWorlds();
-    save(); closeModal(); renderMap(); refreshUI();
-    if (view === 'city') renderCity();
-    celebrate(x.e, 0, x.n + '!');
-    setTimeout(() => confetti(220), 500);
+    S.map.wslots[x.id] = slot != null ? slot : freeWonderSlot();
+    const opened = unlockWorlds();
+    save(); closeModal();
+    if (view !== 'city') setView('city');
+    construct(`[data-wslot="${S.map.wslots[x.id]}"]`, () => {
+      renderCurrent(); renderNav(); shownCoins = -1; refreshUI();
+      celebrate(x.e, 0, x.n + '!');
+      setTimeout(() => confetti(220), 500);
+      if (opened) toast('📍 ' + placeIcon('w4') + '?');
+    });
   }
-  function showWonder(x) {
+  function showWonder(x, slot) {
     ac(); sfx.pop();
     const built = wonderBuilt(x), ready = wonderReady(x), prev = WONDERS[WONDERS.indexOf(x) - 1];
     const chip = (ok, html) => `<span class="chip ${ok ? 'ok' : 'no'}">${html} ${ok ? '✅' : '❌'}</span>`;
@@ -883,41 +1018,22 @@
       <div class="chips">${x.cost.map(([w, c]) => chip(S.worlds[w].coins >= c, `${WD[w].icon} 💰${fmt(c)}`)).join('')}</div>
       <button class="bigbtn${ready ? ' can' : ''}" id="wBuild">🔨 ${x.e}</button>`}</div>`);
     const bb = $('#wBuild');
-    if (bb) bb.addEventListener('click', () => buildWonder(x, bb));
+    if (bb) bb.addEventListener('click', () => buildWonder(x, bb, slot));
   }
-  function applyTheme() {
-    const D = WD[S.cur], r = document.documentElement.style;
-    D.bg.forEach((c, i) => r.setProperty('--bg' + (i + 1), c));
-    r.setProperty('--wood', D.fence[0]);
-    r.setProperty('--wood2', D.fence[1]);
+  function wonderSlotTap(slot, btn) {
+    const x = WONDERS.find(y => S.map.wslots[y.id] === slot);
+    if (x) { btn.classList.remove('wiggle'); void btn.offsetWidth; btn.classList.add('wiggle'); sfx.boing(); toast(`${x.e} ${x.fx}`); return; }
+    const next = WONDERS.find(y => !wonderBuilt(y));
+    if (next) showWonder(next, slot); else toast('⭐');
   }
-  function goWorld(w) {
-    ac();
-    if (w === S.cur) {
-      if (view === 'city') { setView('world'); sfx.buy(); } else sfx.pop();
-      return;
-    }
-    S.cur = w; S.seen[w] = true;
-    bindWorld(); resetRT(); applyTheme();
-    buildFarm(); renderLanes();
-    view = 'world'; document.body.classList.remove('cityview');
-    renderMap();
-    shownCoins = -1; refreshUI(); save();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    sfx.buy(); buzz(20);
-  }
-
-  // ---------- views: the city map (home) or inside a business ----------
-  let view = 'world';
-  function setView(v) {
-    view = v;
-    document.body.classList.toggle('cityview', v === 'city');
-    renderMap();
-    if (v === 'city') {
-      renderCity();
-      const q = activeQuest(), target = q ? $(`#city [data-d="${questDistrict(q)}"]`) : null;
-      setTimeout(() => (target || $('#city .dist[data-d="0"]')).scrollIntoView({ behavior: 'smooth', block: 'center' }), 60);
-    } else window.scrollTo({ top: 0, behavior: 'smooth' });
+  // story "Go" button: take the player to exactly the right place
+  function goQuest(q) {
+    const [t, w, k] = q.g;
+    if (t === 'wonder') { setView('city', { wonders: true }); setTimeout(() => showWonder(WONDERS.find(x => x.id === w)), 500); return; }
+    if (!S.worlds[w].u) return;
+    if (!placed('w' + w)) { setView('city'); return; }
+    if (t === 'sold' || t === 'hire') { openDistrict(w); if (G.lanes[k].u) openLane(k); return; }
+    openDistrict(w, t === 'lane' ? { pen: k } : { slots: true });
   }
 
   // ---------- story: Snoozeville wakes up ----------
@@ -957,7 +1073,7 @@
     if (show) { const [w, amt] = q.r; S.worlds[w].coins += amt; S.worlds[w].total += amt; }
     S.pend = true; save();
     renderQuest(); refreshMapBtn();
-    if (view === 'city') renderCity();
+    renderCurrent(); renderNav();
     if (!show) return;
     talk({ who: q.who, text: q.thanks, file: q.id + 'b', reward: q.r, shop: q.shop });
     const nq = activeQuest();
@@ -1035,8 +1151,7 @@
     const go = $('#dGo');
     if (go) go.onclick = () => {
       talkQ.length = 0; nextTalk();
-      if (goW === 'city') { setView('city'); const x = WONDERS.find(y => y.id === st.quest.g[1]); setTimeout(() => showWonder(x), 400); }
-      else if (S.worlds[goW].u) goWorld(goW);
+      goQuest(st.quest);
     };
     if (st.finale) setTimeout(() => { renderCity(); renderQuest(); }, 300);
   }
@@ -1048,11 +1163,11 @@
   // ---------- quest card (always shows what to do next) ----------
   function renderQuest() {
     const box = $('#quest'), q = activeQuest();
-    if (!S.story.intro) { box.classList.add('hidden'); return; }
-    box.classList.remove('hidden');
+    if (!S.story.intro) { box.classList.add('hidden'); layoutMap(); return; }
+    if (box.classList.contains('hidden')) { box.classList.remove('hidden'); layoutMap(); }
     const html = q ? `<span class="qface">${face(q.who)}</span><span class="qgoal">${goalChip(q.g)}</span><span class="qgo">💬</span>`
       : `<span class="qface">🏆</span><span class="qgoal">${esc(townName())} ✨</span><span class="qgo">🏙️</span>`;
-    if (box._h !== html) { box.innerHTML = html; box._h = html; }
+    if (box._h !== html) { box.innerHTML = html; box._h = html; layoutMap(); }
   }
   $('#quest').addEventListener('click', () => {
     ac();
@@ -1060,92 +1175,357 @@
     if (q) talk(askStep(q)); else setView('city');
   });
 
-  // ---------- the city map ----------
-  const DISTRICTS = ['Farm Fields', 'Pet Street', 'Zoo Park', 'Builder Yard', 'Space Port'];
-  const CITY_ORDER = [4, 3, 2, 'square', 'food', 1, 'garage', 0]; // top to bottom: the town grows up the map
-  function cityCars(seed) {
-    const done = Object.keys(S.story.done).length;
-    if (!done) return '';
+  // ---------- the maps ----------
+  const mapView = $('#mapview'), mapWorld = $('#mapworld');
+  const CW = 1000, CH = 1400;             // city map size
+  const DW = 900, DH = 800;               // district map size
+  const PLOT_W = 300, PLOT_H = 250;
+  const PLOTS = { p1: [190, 1210], p2: [810, 1210], p3: [180, 850], p4: [820, 820], p5: [190, 470], p6: [810, 430], p7: [500, 190], p8: [500, 1250] };
+  const WSLOTS = [[420, 735], [580, 735], [420, 930], [580, 930], [500, 1010]];
+  const RING = { x1: 340, y1: 540, x2: 660, y2: 1080 };
+  const SLOT_POS = [[120, 250], [340, 250], [560, 250], [780, 250], [120, 385], [340, 385], [560, 385], [780, 385]];
+  const PEN_POS = [[150, 585], [450, 585], [750, 585], [150, 722], [450, 722], [750, 722]];
+
+  // ----- drag to move, pinch / wheel to zoom -----
+  const PZ = {};                          // remembered position per map
+  let pz = null;
+  function layoutMap() {
+    const q = $('#quest'), ref = q && !q.classList.contains('hidden') ? q : $('#navbar');
+    const top = Math.round(ref.getBoundingClientRect().bottom + 8);
+    document.documentElement.style.setProperty('--mapTop', top + 'px');
+    if (pz) pz.apply();
+  }
+  window.addEventListener('resize', () => setTimeout(layoutMap, 50));
+  function usePZ(key, W, H) {
+    mapWorld.style.width = W + 'px'; mapWorld.style.height = H + 'px';
+    const fresh = !PZ[key];
+    const st = PZ[key] || (PZ[key] = { x: 0, y: 0, s: 1 });
+    const vw = () => mapView.clientWidth, vh = () => mapView.clientHeight;
+    const fit = () => Math.min(vw() / W, vh() / H);
+    const minS = () => fit() * 0.95, maxS = () => Math.max(1.6, fit() * 4);
+    function apply() {
+      st.s = Math.min(maxS(), Math.max(minS(), st.s));
+      const ww = W * st.s, wh = H * st.s;
+      st.x = ww <= vw() ? (vw() - ww) / 2 : Math.min(0, Math.max(vw() - ww, st.x));
+      st.y = wh <= vh() ? (vh() - wh) / 2 : Math.min(0, Math.max(vh() - wh, st.y));
+      mapWorld.style.transform = `translate(${st.x}px,${st.y}px) scale(${st.s})`;
+    }
+    function zoomAt(px, py, s) {
+      const wx = (px - st.x) / st.s, wy = (py - st.y) / st.s;
+      st.s = Math.min(maxS(), Math.max(minS(), s));
+      st.x = px - wx * st.s; st.y = py - wy * st.s;
+      apply();
+    }
+    function centerOn(wx, wy, s) {
+      if (s) st.s = s;
+      st.x = vw() / 2 - wx * st.s; st.y = vh() / 2 - wy * st.s;
+      apply();
+    }
+    if (fresh) { st.s = Math.max(fit(), Math.min(1, vw() / (W === CW ? 800 : W))); centerOn(W / 2, H / 2); }
+    pz = { st, apply, zoomAt, centerOn, W, H };
+    apply();
+    return pz;
+  }
+  (function panZoomEvents() {
+    const pts = new Map();
+    let moved = 0, pinch = null;
+    mapView.addEventListener('pointerdown', e => {
+      pts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (pts.size === 1) moved = 0;
+      if (pts.size === 2 && pz) {
+        const [a, b] = [...pts.values()];
+        pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), s: pz.st.s };
+      }
+    });
+    window.addEventListener('pointermove', e => {
+      if (!pts.has(e.pointerId) || !pz) return;
+      const [ox, oy] = pts.get(e.pointerId);
+      pts.set(e.pointerId, [e.clientX, e.clientY]);
+      const r = mapView.getBoundingClientRect();
+      if (pts.size === 1) {
+        pz.st.x += e.clientX - ox; pz.st.y += e.clientY - oy;
+        moved += Math.abs(e.clientX - ox) + Math.abs(e.clientY - oy);
+        pz.apply();
+      } else if (pts.size === 2 && pinch) {
+        const [a, b] = [...pts.values()];
+        const d = Math.hypot(a[0] - b[0], a[1] - b[1]);
+        pz.zoomAt((a[0] + b[0]) / 2 - r.left, (a[1] + b[1]) / 2 - r.top, pinch.s * d / pinch.d);
+        moved += 20;
+      }
+    });
+    const up = e => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; };
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+    // a drag is not a tap
+    mapView.addEventListener('click', e => { if (moved > 12) { e.stopPropagation(); e.preventDefault(); } }, true);
+    mapView.addEventListener('wheel', e => {
+      if (!pz) return;
+      e.preventDefault();
+      const r = mapView.getBoundingClientRect();
+      pz.zoomAt(e.clientX - r.left, e.clientY - r.top, pz.st.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
+    }, { passive: false });
+  })();
+
+  // ----- moving pictures for buildings -----
+  const SVGS = {
+    ferris: () => {
+      const spokes = [...Array(8)].map((_, i) => `<line x1="60" y1="52" x2="${(60 + 42 * Math.cos(i * Math.PI / 4)).toFixed(1)}" y2="${(52 + 42 * Math.sin(i * Math.PI / 4)).toFixed(1)}"/>`).join('');
+      const cars = ['#ff5a5a', '#3d8bff', '#ffd84d', '#4cd964', '#ff7eb6', '#a259ff', '#ff9a3c', '#14b8a6']
+        .map((c, i) => `<circle cx="${(60 + 42 * Math.cos(i * Math.PI / 4)).toFixed(1)}" cy="${(52 + 42 * Math.sin(i * Math.PI / 4)).toFixed(1)}" r="7" fill="${c}" stroke="#fff" stroke-width="1.5"/>`).join('');
+      return `<svg viewBox="0 0 120 124" class="svgb"><g stroke="#8a5cf6" stroke-width="4" stroke-linecap="round"><line x1="60" y1="52" x2="32" y2="120"/><line x1="60" y1="52" x2="88" y2="120"/><line x1="24" y1="120" x2="96" y2="120"/></g>
+        <g class="spin" style="transform-origin:60px 52px"><circle cx="60" cy="52" r="42" fill="none" stroke="#ff5a5a" stroke-width="4"/><g stroke="#ffe27a" stroke-width="2">${spokes}</g>${cars}</g><circle cx="60" cy="52" r="6" fill="#3b2a1a"/></svg>`;
+    },
+    coaster: () => {
+      const track = 'M6,104 C22,10 40,10 50,78 S78,116 88,36 S110,26 116,104';
+      const legs = [[20, 50], [38, 30], [62, 96], [88, 40], [104, 56]].map(([x, y]) => `<line x1="${x}" y1="${y}" x2="${x}" y2="118"/>`).join('');
+      const cart = (c, b) => `<g><rect x="-8" y="-6" width="16" height="10" rx="3" fill="${c}" stroke="#fff" stroke-width="1"/><animateMotion dur="3.4s" begin="${b}s" repeatCount="indefinite" rotate="auto" path="${track}"/></g>`;
+      return `<svg viewBox="0 0 122 122" class="svgb"><g stroke="#9b7653" stroke-width="2.5">${legs}</g>
+        <path d="${track}" fill="none" stroke="#ff5a5a" stroke-width="6" stroke-linecap="round"/><path d="${track}" fill="none" stroke="#fff" stroke-width="1.5" stroke-dasharray="3 5"/>
+        ${cart('#3d8bff', 0)}${cart('#ffd84d', -0.25)}${cart('#4cd964', -0.5)}</svg>`;
+    },
+    crane: () => `<svg viewBox="0 0 120 124" class="svgb"><g stroke="#f5a623" stroke-width="5" stroke-linecap="round"><line x1="40" y1="120" x2="40" y2="22"/></g>
+      <g stroke="#f5a623" stroke-width="2"><line x1="34" y1="110" x2="46" y2="96"/><line x1="34" y1="90" x2="46" y2="76"/><line x1="34" y1="70" x2="46" y2="56"/><line x1="34" y1="50" x2="46" y2="36"/></g>
+      <g class="swing" style="transform-origin:40px 22px"><line x1="10" y1="22" x2="112" y2="22" stroke="#f5a623" stroke-width="5" stroke-linecap="round"/><rect x="6" y="20" width="16" height="12" fill="#7a7a7a"/>
+      <g class="hoist"><line x1="96" y1="22" x2="96" y2="64" stroke="#3b2a1a" stroke-width="1.5"/><rect x="86" y="64" width="20" height="14" rx="2" fill="#e2552e"/></g></g>
+      <rect x="28" y="116" width="24" height="6" fill="#7a7a7a"/></svg>`,
+    dish: () => `<svg viewBox="0 0 120 120" class="svgb"><rect x="54" y="70" width="12" height="40" fill="#9aa5b8"/><rect x="38" y="106" width="44" height="8" rx="3" fill="#7d8aa3"/>
+      <g class="swing" style="transform-origin:60px 70px"><path d="M18,52 Q60,100 102,52 Z" fill="#e6ecf2" stroke="#7d8aa3" stroke-width="3"/><line x1="60" y1="74" x2="60" y2="34" stroke="#7d8aa3" stroke-width="3"/><circle cx="60" cy="32" r="5" fill="#ff5a5a" class="blinkdot"/></g></svg>`,
+    windmill: () => `<svg viewBox="0 0 120 130" class="svgb"><path d="M48,126 L54,52 L66,52 L72,126 Z" fill="#f3e6cf" stroke="#b9773b" stroke-width="2"/><rect x="55" y="104" width="10" height="22" fill="#b9773b"/>
+      <g class="spin slow" style="transform-origin:60px 50px">${[0, 90, 180, 270].map(a => `<rect x="56" y="6" width="8" height="44" rx="2" fill="#fff" stroke="#b9773b" stroke-width="1.5" transform="rotate(${a} 60 50)"/>`).join('')}</g><circle cx="60" cy="50" r="5" fill="#8a5426"/></svg>`,
+    carousel: () => `<svg viewBox="0 0 120 120" class="svgb"><rect x="57" y="30" width="6" height="74" fill="#ffd84d"/><ellipse cx="60" cy="104" rx="50" ry="10" fill="#ff7eb6"/>
+      <path d="M10,40 L60,8 L110,40 Z" fill="#ff5a5a"/><path d="M10,40 L60,8 L35,40 Z M60,8 L85,40 L110,40 Z" fill="#fff" opacity=".85"/><circle cx="60" cy="8" r="4" fill="#ffd84d"/>
+      ${[24, 60, 96].map((x, i) => `<text x="${x}" y="84" font-size="26" text-anchor="middle" class="ride${i}">🐴</text>`).join('')}</svg>`,
+    fountain: () => `<svg viewBox="0 0 120 120" class="svgb"><ellipse cx="60" cy="96" rx="52" ry="18" fill="#c9c2b5"/><ellipse cx="60" cy="92" rx="44" ry="13" fill="#7cc8e8"/>
+      <rect x="54" y="52" width="12" height="40" fill="#c9c2b5"/><ellipse cx="60" cy="52" rx="20" ry="6" fill="#c9c2b5"/>
+      <g class="water">${[-1, 0, 1].map(d => `<path d="M60,48 Q${60 + d * 26},${4} ${60 + d * 40},90" fill="none" stroke="#7cc8e8" stroke-width="4" stroke-linecap="round"/>`).join('')}</g>
+      ${[0, 1, 2, 3].map(i => `<circle cx="${36 + i * 16}" cy="70" r="3" fill="#bfe7fa" class="drop d${i}"/>`).join('')}</svg>`,
+  };
+  const fxHTML = {
+    smoke: '<i class="fx smoke"><b></b><b></b><b></b></i>',
+    flag: '<i class="fx flag"></i>',
+    flags: '<i class="fx flag"></i><i class="fx flag f2"></i>',
+    blink: '<i class="fx blink"></i>',
+    spark: '<i class="fx spark">✨</i>',
+    peck: '<i class="fx peck">🐔</i>',
+    wag: '<i class="fx wag">🐕</i>',
+    hammer: '<i class="fx hammer">🔨</i>',
+    bubbles: '<i class="fx bubbles"><b></b><b></b><b></b></i>',
+    orbit: '<i class="fx orbit"><b>🌙</b></i>',
+    fireworks: '<i class="fx fw">🎆</i>',
+    flame: '<i class="fx flame">🔥</i>',
+    wheat: '<i class="fx peck">🌾</i>',
+    bounce: '',
+  };
+  // what each world's six buildings look like on the map
+  const BV = [
+    [['peck'], ['wheat'], ['smoke'], ['flag'], ['smoke', 'smoke'], ['flags', 'glow']],
+    [['wag'], ['blink'], ['glow'], ['bounce'], ['flag'], ['flags', 'spark']],
+    [['flags'], 'ferris', 'coaster', ['flag'], ['glow'], ['fireworks', 'flags']],
+    [['hammer'], 'crane', ['smoke'], ['glow'], ['glow', 'spark'], ['flame', 'rocket']],
+    [['flag'], ['swingE'], ['bubbles'], 'dish', ['spark', 'glow'], ['orbit']],
+  ];
+  function bvis(e, look) {
+    if (typeof look === 'string' && SVGS[look]) return `<span class="bv svgwrap">${SVGS[look]()}</span>`;
+    const fx = (look || []).map(f => fxHTML[f] || '').join('');
+    const cls = (look || []).filter(f => ['glow', 'bounce', 'rocket', 'swingE'].includes(f)).join(' ');
+    return `<span class="bv ${cls}"><span class="be">${e}</span>${fx}</span>`;
+  }
+  const WONDER_LOOK = { train: ['smoke'], fair: 'carousel', castle: ['flags'], space: ['orbit', 'blink'], statue: ['spark', 'glow'] };
+
+  // ----- a district: shops street, building plots, road, animal pens -----
+  function districtScene(w, mini) {
+    const D = WD[w], g = S.worlds[w], sl = S.map.slots['w' + w] || {};
+    const inSlot = {}; Object.keys(sl).forEach(b => { inSlot[sl[b]] = +b; });
+    const next = g.b.indexOf(false), nextLane = g.lanes.findIndex(L => !L.u);
+    const shops = QUESTS.filter(q => q.shop && questDistrict(q) === w).map((q, i) => {
+      const isNow = activeQuest() === q, st = helpedQuest(q) ? 'open' : isNow ? 'now' : 'closed';
+      return `<button class="mshop ${st}" data-shop="${q.id}" style="left:${75 + i * 125 - 55}px;top:38px">
+        <span class="se">${st === 'open' ? q.shop[0] : '🏚️'}</span><span class="so">${face(q.who)}${st === 'now' ? '<i>❗</i>' : st === 'closed' ? '<i>💤</i>' : ''}</span>
+        <span class="lbl">${st === 'open' ? esc(q.shop[1]) : esc(PEOPLE[q.who].name)}</span></button>`;
+    }).join('');
+    const slots = SLOT_POS.map(([x, y], s) => {
+      const b = inSlot[s];
+      if (b != null) return `<button class="mslot built" data-slot="${s}" style="left:${x - 75}px;top:${y - 62}px">${bvis(D.build[b].e, BV[w][b])}<span class="lbl">${esc(D.build[b].n)}</span></button>`;
+      const can = next >= 0 && g.coins >= D.build[next].cost;
+      return `<button class="mslot empty${can ? ' can' : ''}" data-slot="${s}" style="left:${x - 75}px;top:${y - 62}px"><span class="plus">＋</span><span class="ssign">🪧</span></button>`;
+    }).join('');
+    const pens = PEN_POS.map(([x, y], k) => {
+      const A = D.lanes[k], L = g.lanes[k];
+      if (!L.u) {
+        const isNext = k === nextLane, P = D.lanes[k - 1];
+        return `<button class="mpen locked${isNext ? ' next' : ''}" data-pen="${k}" style="left:${x - 125}px;top:${y - 57}px">
+          <span class="lockA">${A.a}</span><span class="plock">🔒</span>${isNext ? `<span class="pgoal" data-goal="${k}">${P.p} ${Math.min(S.worlds[w].lanes[k - 1].sold, A.unlock.need)}/${A.unlock.need}</span>` : ''}</button>`;
+      }
+      const herd = [...Array(Math.min(L.n, 5))].map((_, i) => `<i style="left:${10 + i * 15}%;animation-duration:${3 + (i * 7 % 4)}s;animation-delay:-${i * 1.3}s">${A.a}</i>`).join('');
+      return `<button class="mpen" data-pen="${k}" style="left:${x - 125}px;top:${y - 57}px;--dirt:${A.dirt}">
+        <span class="herd${D.still ? ' still' : ''}">${herd}</span>
+        <span class="pbadge" data-penk="${k}">${A.p} ${fmt(Math.floor(L.g))}</span>
+        ${L.col ? `<span class="mworker">${D.work.col.e}</span>` : ''}
+        ${L.cash ? `<span class="mstall">🏪<b>${D.work.cash.e}</b></span>` : '<span class="mstall">🪵</span>'}
+        ${L.truck ? `<span class="mtruck">${VEH[w][tierOf(L.truck)]}</span>` : ''}
+        <span class="lbl">${A.a} ${fmt(L.sold)}</span></button>`;
+    }).join('');
+    const deco = [[30, 470, 0], [870, 470, 1], [20, 780, 1], [880, 790, 0], [300, 168, 0], [600, 168, 1]]
+      .map(([x, y, i]) => `<span class="ddeco" style="left:${x}px;top:${y}px">${D.lanes[i].deco[i]}</span>`).join('');
+    const extra = w === 0 ? `<span class="dbig" style="left:822px;top:120px">${SVGS.windmill()}</span>`
+      : w === 2 ? '<span class="pond" style="left:20px;top:150px"></span>'
+      : w === 4 ? '<span class="crater" style="left:30px;top:140px"></span><span class="crater c2" style="left:840px;top:430px"></span>' : '';
+    const tier = Math.max(...g.lanes.map(L => L.truck));
+    const car = tier ? `<span class="dcar"><span>${VEH[w][tierOf(tier)]}</span></span>` : '';
+    return `<div class="dground g${w}" style="--g1:${D.lanes[0].tint};--g2:${D.bg[3]}">
+      <svg class="droads" viewBox="0 0 ${DW} ${DH}" preserveAspectRatio="none"><path d="M0,168 H${DW} M0,470 H${DW} M300,168 V${DH} M600,168 V${DH}" stroke="#9a9a9a" stroke-width="30" fill="none"/>
+      <path d="M0,470 H${DW}" stroke="#fff" stroke-width="3" stroke-dasharray="14 12" fill="none"/></svg>
+      ${extra}${deco}<div class="dstreet">${car}</div>${shops}${slots}${pens}
+      ${mini ? '' : `<div class="dname">${D.icon} ${esc(g.b[5] ? D.done : D.title)}</div>`}</div>`;
+  }
+  function renderDistrictMap(focus) {
+    usePZ('w' + S.cur, DW, DH);
+    $('#mapbannerHost').innerHTML = '';
+    mapWorld.className = 'district';
+    mapWorld.innerHTML = districtScene(S.cur, false) + '<div class="nightveil"></div>';
+    mapWorld.querySelectorAll('.mpen').forEach(b => b.addEventListener('click', () => penTap(+b.dataset.pen, b)));
+    mapWorld.querySelectorAll('.mslot').forEach(b => b.addEventListener('click', () => slotTap(+b.dataset.slot, b)));
+    mapWorld.querySelectorAll('.mshop').forEach(b => b.addEventListener('click', () => shopTap(b.dataset.shop, b)));
+    if (focus && focus.pen != null) {
+      const [x, y] = PEN_POS[focus.pen];
+      pz.centerOn(x, y);
+      const p = $(`#mapworld [data-pen="${focus.pen}"]`); if (p) p.classList.add('focus');
+    }
+    if (focus && focus.slots) { mapWorld.querySelectorAll('.mslot.empty').forEach(s => s.classList.add('focus')); pz.centerOn(DW / 2, 320); }
+    dayNight();
+  }
+  function shopTap(id, b) {
+    const q = QUESTS.find(x => x.id === id);
+    b.classList.remove('wiggle'); void b.offsetWidth; b.classList.add('wiggle');
+    if (helpedQuest(q)) talk({ who: q.who, text: q.thanks, file: q.id + 'b' });
+    else if (activeQuest() === q) talk(askStep(q));
+    else { sfx.pop(); toast('💤'); }
+  }
+
+  // ----- mini scenes for the garage and food street plots -----
+  function garageMini() {
+    const owned = RIDES.filter(r => S.city.cars[r.id]);
+    const parked = owned.map((r, i) => `<span class="parked" style="left:${18 + (i % 5) * 54}px;top:${40 + Math.floor(i / 5) * 70}px">${r.e}</span>`).join('');
+    return `<div class="lot">${parked}<span class="lotdrive"><span>${rideEmoji() || '🚶'}</span><b>${curProfile().av}</b></span><span class="lotsign">🚗</span></div>`;
+  }
+  function foodMini() {
+    return `<div class="foodst">${FOOD.map((f, i) => {
+      const own = !!S.city.food[f.id];
+      return `<span class="fshop${own ? ' own' : ''}" style="left:${12 + (i % 3) * 96}px;top:${22 + Math.floor(i / 3) * 112}px">
+        <span>${own ? f.e : '🏚️'}</span>${own ? `<i class="tip" data-tip="${f.id}"></i><em>🧑👧</em>` : ''}</span>`;
+    }).join('')}</div>`;
+  }
+
+  // ----- the whole city -----
+  function cityRoads() {
+    const r = RING, c = (a, b) => `M${a[0]},${a[1]} L${b[0]},${b[1]}`;
+    const links = [c([r.x1, r.y2], [r.x1, 1210]), c([r.x2, r.y2], [r.x2, 1210]), c([500, r.y2], [500, 1125]), c([r.x1, 850], [330, 850]),
+      c([r.x2, 820], [670, 820]), c([r.x1, r.y1], [r.x1, 470]), c([r.x2, r.y1], [r.x2, 430]), c([500, r.y1], [500, 315])].join(' ');
+    return { ring: `M${r.x1},${r.y1} H${r.x2} V${r.y2} H${r.x1} Z`, links };
+  }
+  function renderCityMap(focus) {
+    usePZ('city', CW, CH);
+    mapWorld.className = 'citymap';
+    const roads = cityRoads(), pending = needPlacing();
+    const lit = !!S.story.done.q23, done = Object.keys(S.story.done).length;
+    // traffic grows as the town wakes up
     const pool = ['🚗', '🚕', '🚙', '🚌', '🛵', '🚲'];
     if (S.story.done.q11) pool.push('🚒');
     if (S.story.done.q20) pool.push('🚓');
-    S.worlds.forEach((g, w) => { if (g.u) pool.push(VEH[w][Math.min(2, tierOf(Math.max(...g.lanes.map(L => L.truck))))]); });
-    const n = Math.min(4, 1 + Math.floor(done / 6));
-    let html = '';
-    for (let i = 0; i < n; i++) {
-      const dur = 7 + ((i * 37 + seed * 13) % 9), back = (i + seed) % 2;
-      html += `<span class="car${back ? ' back' : ''}" style="animation-duration:${dur}s;animation-delay:-${(i * 2.3 + seed * 3.1) % dur}s"><span>${pool[(i * 5 + seed * 3 + done) % pool.length]}</span></span>`;
-    }
-    // people on the pavement
-    const folk = ['🚶', '🚶‍♀️', '🏃‍♀️', '🚶‍♂️', '👫', '🧍'].concat(Object.keys(PEOPLE).filter(personHelped).map(id => PEOPLE[id].job));
-    const np = Math.min(5, Math.ceil(done / 5));
-    for (let i = 0; i < np; i++) {
-      const dur = 14 + ((i * 29 + seed * 7) % 12);
-      html += `<span class="ped${(i + seed) % 2 ? ' back' : ''}" style="animation-duration:${dur}s;animation-delay:-${(i * 4.1 + seed * 2.7) % dur}s"><span>${folk[(i * 7 + seed * 5) % folk.length]}</span></span>`;
-    }
-    return html;
-  }
-  function renderCity() {
-    const box = $('#city');
-    const done = Object.keys(S.story.done).length, total = QUESTS.length;
-    const lights = !!S.story.done.q23;
-    let roadN = 0;
-    const road = () => `<div class="croad${lights ? ' lit' : ''}">${cityCars(roadN++)}</div>`;
-    const blocks = CITY_ORDER.map(d => {
-      if (d === 'garage') return garageBlock();
-      if (d === 'food') return foodBlock();
-      if (d === 'square') {
-        const walkers = Object.keys(PEOPLE).filter(id => personHelped(id)).slice(0, 10)
-          .map((id, i) => `<span class="walker" style="animation-duration:${9 + (i % 4) * 3}s;animation-delay:-${i * 1.7}s;top:${58 + (i % 3) * 12}%">${PEOPLE[id].job}</span>`).join('');
-        return `<section class="dist square" data-d="square">
-          <div class="dhead">⛲ Town Square</div>
-          <div class="sqrow"><button class="hall" data-who="max"><span>🏛️</span><b>${face('max')}</b></button>
-          ${WONDERS.map(x => `<button class="landmark${wonderBuilt(x) ? ' built' : wonderReady(x) ? ' ready' : needMet(x) ? '' : ' locked'}" data-x="${x.id}"><span>${x.e}</span><i>${esc(x.n)}</i></button>`).join('')}</div>
-          <div class="plaza">${walkers}</div>
-        </section>`;
+    const nCars = done ? Math.min(6, 1 + Math.floor(done / 5)) : 0;
+    const cars = [...Array(nCars)].map((_, i) => `<text font-size="34" class="mcar" dy="12" text-anchor="middle">${pool[(i * 3 + done) % pool.length]}<animateMotion dur="${18 + i * 3}s" begin="-${i * 4.3}s" repeatCount="indefinite" path="${roads.ring}"/></text>`).join('');
+    const folk = ['🚶', '🚶‍♀️', '🏃‍♀️', '👫'].concat(Object.keys(PEOPLE).filter(personHelped).map(id => PEOPLE[id].job));
+    const peds = [...Array(Math.min(8, Math.ceil(done / 4)))].map((_, i) => `<text font-size="22" dy="-16" text-anchor="middle">${folk[(i * 5) % folk.length]}<animateMotion dur="${50 + i * 7}s" begin="-${i * 9}s" repeatCount="indefinite" path="${roads.ring}"/></text>`).join('');
+    const lamps = lit ? [[RING.x1, 700], [RING.x1, 950], [RING.x2, 700], [RING.x2, 950], [450, RING.y1], [550, RING.y2], [500, 420], [RING.x1, 1150], [RING.x2, 1150]]
+      .map(([x, y]) => `<circle cx="${x + 22}" cy="${y}" r="7" class="lamp"/>`).join('') : '';
+    const train = S.wonders.train ? `<path d="M30,40 H970 V1370 H30 Z" fill="none" stroke="#8a5426" stroke-width="10" stroke-dasharray="4 10"/><path d="M30,40 H970 V1370 H30 Z" fill="none" stroke="#666" stroke-width="3"/>
+      ${['🚂', '🚃', '🚃', '🚃'].map((t, i) => `<text font-size="38" text-anchor="middle" dy="12">${t}<animateMotion dur="40s" begin="-${i * 0.75}s" repeatCount="indefinite" path="M30,40 H970 V1370 H30 Z"/></text>`).join('')}` : '';
+    const svg = `<svg class="terrain" viewBox="0 0 ${CW} ${CH}" width="${CW}" height="${CH}">
+      <defs><pattern id="grassdots" width="40" height="40" patternUnits="userSpaceOnUse"><circle cx="8" cy="10" r="2" fill="#6fbf4a"/><circle cx="28" cy="30" r="2.5" fill="#86d062"/></pattern></defs>
+      <rect width="${CW}" height="${CH}" fill="#8fd16a"/><rect width="${CW}" height="${CH}" fill="url(#grassdots)"/>
+      <path d="M0,22 C200,60 360,0 520,28 S820,70 1000,20 L1000,0 L0,0 Z" fill="#7cc8e8"/>
+      <ellipse cx="500" cy="810" rx="150" ry="170" fill="#efe4c9" stroke="#d8c7a0" stroke-width="6"/>
+      <path d="${roads.ring} ${roads.links}" fill="none" stroke="#8d8d8d" stroke-width="40" stroke-linejoin="round"/>
+      <path d="${roads.ring} ${roads.links}" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="16 14"/>
+      ${train}${lamps}${cars}${peds}</svg>`;
+    const plots = Object.entries(PLOTS).map(([id, [x, y]]) => {
+      const key = Object.keys(S.map.places).find(k => S.map.places[k] === id);
+      const style = `left:${x - PLOT_W / 2}px;top:${y - PLOT_H / 2}px;width:${PLOT_W}px;height:${PLOT_H}px`;
+      if (!key) return `<div role="button" class="cplot empty${pending.length ? ' pick' : ''}" data-plot="${id}" style="${style}"><span class="psign">🪧</span>${pending.length ? '<span class="arrow">⬇️</span>' : ''}</div>`;
+      let inner;
+      if (key === 'garage') inner = garageMini();
+      else if (key === 'food') inner = foodMini();
+      else {
+        const sc = Math.min(PLOT_W / DW, PLOT_H / DH);
+        inner = `<div class="dmap mini" style="left:${(PLOT_W - DW * sc) / 2}px;top:${(PLOT_H - DH * sc) / 2}px;transform:scale(${sc})">${districtScene(+key.slice(1), true)}</div>`;
       }
-      const D = WD[d], g = S.worlds[d];
-      const shops = QUESTS.filter(q => q.shop && questDistrict(q) === d).map(q => {
-        const isNow = activeQuest() === q, st = helpedQuest(q) ? 'open' : isNow ? 'now' : 'closed';
-        return `<button class="shop ${st}" data-q="${q.id}">
-          <span class="se">${st === 'open' ? q.shop[0] : '🏚️'}</span>
-          <span class="so">${face(q.who)}${st === 'now' ? '<i>❗</i>' : st === 'closed' ? '<i>💤</i>' : ''}</span>
-          <span class="sn">${st === 'open' ? esc(q.shop[1]) : esc(PEOPLE[q.who].name)}</span></button>`;
-      }).join('');
-      const builds = D.build.map((b, i) => `<span class="cb${g.b[i] ? ' on' : ''}">${g.b[i] ? b.e : '🟫'}</span>`).join('');
-      const icon = g.u || !D.wonder ? D.icon : '❓';
-      const here = activeQuest() && questDistrict(activeQuest()) === d;
-      return `<section class="dist d${d}${g.u ? '' : ' locked'}${here ? ' here' : ''}" data-d="${d}" style="--dt:${D.lanes[0].tint};--dg:${D.bg[3]}">
-        <div class="dhead">${icon} ${g.u ? DISTRICTS[d] : '???'}${g.b[5] ? ' 👑' : ''}</div>
-        <div class="cbuilds">${builds}</div>
-        <div class="shops">${shops}</div>
-        ${g.u ? `<button class="dgo" data-w="${d}">▶️</button>` : '<div class="fog"><span>☁️</span><span>🔒</span><span>☁️</span></div>'}
-      </section>`;
-    });
-    box.style.setProperty('--sat', (0.3 + 0.7 * done / total).toFixed(2));
+      const w = key[0] === 'w' ? +key.slice(1) : null;
+      const here = w != null && activeQuest() && questDistrict(activeQuest()) === w;
+      return `<div role="button" class="cplot placed${here ? ' here' : ''}" data-plot="${id}" data-key="${key}" style="${style}">${inner}<span class="plotsign">${placeIcon(key)} ${esc(placeName(key))}${w != null && S.worlds[w].b[5] ? ' 👑' : ''}</span></div>`;
+    }).join('');
+    const wslots = WSLOTS.map(([x, y], i) => {
+      const x0 = WONDERS.find(v => S.map.wslots[v.id] === i);
+      const ready = !x0 && WONDERS.some(wonderReady);
+      return `<button class="wslot${x0 ? ' built' : ''}${ready ? ' ready' : ''}" data-wslot="${i}" style="left:${x - 55}px;top:${y - 55}px">
+        ${x0 ? bvis(x0.e, WONDER_LOOK[x0.id]) + `<span class="lbl">${esc(x0.n)}</span>` : '<span class="plus">🏛️</span>'}</button>`;
+    }).join('');
+    const trees = [[60, 120], [130, 60], [880, 640], [950, 980], [50, 640], [40, 1000], [960, 1330], [40, 1340], [690, 1360], [320, 1370], [930, 180], [880, 90]]
+      .map(([x, y], i) => `<span class="tree" style="left:${x}px;top:${y}px">${i % 3 ? '🌳' : '🌲'}</span>`).join('');
+    const mount = '<span class="mount" style="left:880px;top:40px">⛰️</span><span class="mount" style="left:20px;top:40px">🏔️</span>';
     const fly = (S.story.done.q24 ? '<div class="flyover">🚁</div>' : '') + (S.story.done.q30 ? '<div class="flyover hero">🦸</div>' : '');
-    box.innerHTML = `<div class="sign${S.story.finale ? ' gold' : ''}"><span class="skyicon">☀️</span> ${esc(townName())} <span class="skyicon2">${S.story.finale ? '✨' : '💤'}</span><small>😊 ${done}/${total}</small></div>`
-      + blocks.join(road()) + fly + '<div class="nightveil"><span>✨</span><span>⭐</span><span>✨</span><span>🌙</span><span>⭐</span></div>';
-    box.querySelectorAll('.dgo').forEach(b => b.addEventListener('click', () => goWorld(+b.dataset.w)));
-    box.querySelectorAll('.landmark').forEach(b => b.addEventListener('click', () => showWonder(WONDERS.find(x => x.id === b.dataset.x))));
-    box.querySelectorAll('.hall').forEach(b => b.addEventListener('click', () => {
+    const banner = pending.length ? `<div class="mapbanner">📍 ${placeIcon(pending[0])} ${esc(placeName(pending[0]))}? 👇 🪧</div>` : '';
+    mapWorld.innerHTML = svg + trees + mount
+      + `<button class="hall" data-who="max" style="left:445px;top:575px"><span>🏛️</span><b>${face('max')}</b></button>`
+      + `<span class="fountain" style="left:450px;top:770px">${SVGS.fountain()}</span>`
+      + wslots + plots + fly + '<div class="nightveil"><span>✨</span><span>⭐</span><span>✨</span><span>🌙</span><span>⭐</span></div>';
+    $('#mapbannerHost').innerHTML = banner;
+    mapWorld.querySelectorAll('.cplot').forEach(b => b.addEventListener('click', () => plotTap(b)));
+    mapWorld.querySelectorAll('.wslot').forEach(b => b.addEventListener('click', () => wonderSlotTap(+b.dataset.wslot, b)));
+    mapWorld.querySelector('.hall').addEventListener('click', () => {
       const q = activeQuest();
       if (q && q.who === 'max') talk(askStep(q)); else talk({ who: 'max', text: window.STORY.INTRO.text, file: 'intro' });
-    }));
-    box.querySelectorAll('.shop').forEach(b => b.addEventListener('click', () => {
-      const q = QUESTS.find(x => x.id === b.dataset.q);
-      b.classList.remove('wiggle'); void b.offsetWidth; b.classList.add('wiggle');
-      if (helpedQuest(q)) talk({ who: q.who, text: q.thanks, file: q.id + 'b' });
-      else if (activeQuest() === q) talk(askStep(q));
-      else { sfx.pop(); toast('💤'); }
-    }));
-    box.querySelectorAll('.dist.locked').forEach(b => b.addEventListener('click', () => shake(b)));
-    box.querySelectorAll('.rideb').forEach(b => b.addEventListener('click', () => tapRide(b.dataset.r, b)));
-    box.querySelectorAll('.eat').forEach(b => b.addEventListener('click', () => tapFood(b.dataset.f, b)));
+    });
+    // where to look: the plot to choose, the wonder plots, or the current quest's place
+    let target = null;
+    if (focus && focus.plot) target = PLOTS[focus.plot];
+    else if (pending.length) { const f = freePlots()[0]; if (f) target = PLOTS[f]; }
+    else if (focus && focus.wonders) target = [500, 860];
+    if (focus && focus.wonders) mapWorld.querySelectorAll('.wslot:not(.built)').forEach(s => s.classList.add('focus'));
+    if (target) pz.centerOn(target[0], target[1]);
     attachCityThings(); dayNight(); updateTips();
-    if (!talking && view === 'city') cityHellos();
+    if (!talking) cityHellos();
   }
-
+  function plotTap(b) {
+    ac();
+    const key = b.dataset.key, pending = needPlacing();
+    if (!key) {
+      if (pending.length) return placeHere(b.dataset.plot, pending[0]);
+      sfx.pop(); toast('🪧 🔒'); return;
+    }
+    if (key === 'garage') return showGarage();
+    if (key === 'food') return showFood();
+    openDistrict(+key.slice(1));
+  }
+  function showGarage() { ac(); openModal(garageBlock()); bindPlaceSheet(); }
+  function showFood() { ac(); openModal(foodBlock()); bindPlaceSheet(); updateTips(); }
+  function bindPlaceSheet() {
+    document.querySelectorAll('#sheet .rideb').forEach(b => b.addEventListener('click', () => tapRide(b.dataset.r, b)));
+    document.querySelectorAll('#sheet .eat').forEach(b => b.addEventListener('click', () => tapFood(b.dataset.f, b)));
+  }
+  // live numbers on the map, 4x a second (no full redraw)
+  function liveMap() {
+    if (view === 'district' && openK < 0) {
+      G.lanes.forEach((L, k) => {
+        const b = $(`#mapworld [data-penk="${k}"]`);
+        if (b) b.textContent = `${ANIMALS[k].p} ${fmt(Math.floor(L.g))}`;
+        const gl = $(`#mapworld [data-goal="${k}"]`);
+        if (gl) gl.textContent = `${ANIMALS[k - 1].p} ${Math.min(G.lanes[k - 1].sold, ANIMALS[k].unlock.need)}/${ANIMALS[k].unlock.need}`;
+      });
+      const next = G.b.indexOf(false), can = next >= 0 && G.coins >= BUILD[next].cost;
+      mapWorld.querySelectorAll('.mslot.empty').forEach(s => s.classList.toggle('can', can));
+    }
+    updateTips();
+  }
 
   // ---------- living city: garage, food street, rescues, visitors, day & night ----------
   // City things are paid for (and pay out) in Farm coins: the farm is the town bank.
@@ -1213,13 +1593,17 @@
   function tapRide(id, btn) {
     ac();
     const r = RIDES.find(x => x.id === id);
-    if (S.city.cars[id]) { S.city.ride = id; save(); sfx.honk(); renderCity(); renderLanes(); return; }
+    if (S.city.cars[id]) { S.city.ride = id; save(); sfx.honk(); refreshPlace('garage'); renderLanes(); return; }
     if (r.world != null && !S.worlds[r.world].u) return shake(btn);
     if (S.worlds[BANK].coins < r.cost) return shake(btn);
     S.worlds[BANK].coins -= r.cost;
     S.city.cars[id] = Date.now(); S.city.ride = id; S.pend = true; save();
     sfx.honk(); confetti(70); toast(`${r.e} ${r.n}!`);
-    renderCity(); renderLanes(); refreshUI();
+    refreshPlace('garage'); renderLanes(); refreshUI();
+  }
+  function refreshPlace(kind) {
+    if (!$('#modal').classList.contains('hidden')) (kind === 'garage' ? showGarage : showFood)();
+    renderCurrent();
   }
 
   // ----- food street -----
@@ -1258,11 +1642,11 @@
     if (S.worlds[BANK].coins < f.cost) return shake(btn);
     S.worlds[BANK].coins -= f.cost;
     S.city.food[id] = Date.now(); S.pend = true; save();
-    confetti(90); sfx.partyHorn(); renderCity(); refreshUI();
+    confetti(90); sfx.partyHorn(); refreshPlace('food'); refreshUI();
     quip('o_eat');
   }
   function updateTips() {
-    document.querySelectorAll('#city [data-tip]').forEach(s => {
+    document.querySelectorAll('[data-tip]').forEach(s => {
       const t = tipsOf(FOOD.find(f => f.id === s.dataset.tip));
       s.textContent = t >= 1 ? '💰' + fmt(t) : '';
       s.classList.toggle('full', t >= 1);
@@ -1288,69 +1672,66 @@
     { id: 'dragon', e: '🐉', line: 'v_dragon', need: 'q28', sec: 180 },
   ];
   let cityEv = null, visitor = null, cityT = 0, busyRescue = false;
-  function openDistricts() {
-    return [...document.querySelectorAll('#city .dist[data-d]')].filter(b => !b.classList.contains('locked') && /^\d$/.test(b.dataset.d));
-  }
+  // ----- rescues & visitors on the city map -----
+  const ROAD_SPOTS = [[RING.x1, 690], [RING.x1, 960], [RING.x2, 700], [RING.x2, 990], [450, RING.y1], [590, RING.y2], [500, 420], [RING.x1, 1160], [RING.x2, 1160], [500, 1110]];
+  function openDistricts() { return Object.keys(S.map.places).filter(k => k[0] === 'w').map(k => S.map.places[k]); }
   function spawnRescue() {
-    const kinds = RESCUES.filter(r => S.story.done[r.need]);
-    const spots = openDistricts();
-    if (!kinds.length || !spots.length) return;
-    const r = pick(kinds), b = pick(spots);
-    cityEv = { r, d: b.dataset.d, x: 20 + Math.random() * 55, until: Date.now() + 25000 };
+    const kinds = RESCUES.filter(r => S.story.done[r.need]), spots = openDistricts();
+    if (view !== 'city' || !kinds.length || !spots.length) return;
+    const r = pick(kinds), [px, py] = PLOTS[pick(spots)];
+    cityEv = { r, x: px + (Math.random() - 0.5) * 140, y: py + (Math.random() - 0.5) * 90, until: Date.now() + 25000 };
     attachCityThings();
     tone(880, 0.12, 'square', 0.06); tone(660, 0.12, 'square', 0.06, null, 0.15); // nee-naw
   }
   function spawnVisitor() {
     const kinds = VISITORS.filter(v => S.story.done[v.need]);
-    const roads = [...document.querySelectorAll('#city .croad')];
-    if (!kinds.length || !roads.length) return;
-    visitor = { v: pick(kinds), road: Math.floor(Math.random() * roads.length), x: 15 + Math.random() * 65, until: Date.now() + 15000 };
+    if (view !== 'city' || !kinds.length) return;
+    const [x, y] = pick(ROAD_SPOTS);
+    visitor = { v: pick(kinds), x, y, until: Date.now() + 15000 };
     attachCityThings();
     sfx.tiny();
   }
   // keep the rescue / visitor buttons in sync with state, without replacing ones already on screen
   function attachCityThings() {
-    const cev = $('#city .cev');
-    if (cev && (!cityEv || cev._ev !== cityEv)) { if (!busyRescue) cev.remove(); }
-    if (cityEv && !$('#city .cev')) {
-      const b = $(`#city .dist[data-d="${cityEv.d}"]`);
-      if (b && !b.classList.contains('locked')) {
-        const e = el('button', 'cev', `<span>${cityEv.r.e}</span><i>🚨</i>`);
-        e._ev = cityEv;
-        e.style.left = cityEv.x + '%';
-        e.addEventListener('click', () => doRescue(b, e));
-        b.appendChild(e);
-      } else cityEv = null;
+    if (view !== 'city' || openK >= 0) return;
+    const cev = $('#mapworld .cev');
+    if (cev && (!cityEv || cev._ev !== cityEv) && !busyRescue) cev.remove();
+    if (cityEv && !$('#mapworld .cev')) {
+      const e = el('button', 'cev', `<span>${cityEv.r.e}</span><i>🚨</i>`);
+      e._ev = cityEv;
+      e.style.left = cityEv.x + 'px'; e.style.top = cityEv.y + 'px';
+      e.addEventListener('click', () => doRescue(e));
+      mapWorld.appendChild(e);
     }
-    const vis = $('#city .visitor');
+    const vis = $('#mapworld .visitor');
     if (vis && (!visitor || vis._v !== visitor)) vis.remove();
-    if (visitor && !$('#city .visitor')) {
-      const road = document.querySelectorAll('#city .croad')[visitor.road];
-      if (road) {
-        const e = el('button', 'visitor', visitor.v.e);
-        e._v = visitor;
-        e.style.left = visitor.x + '%';
-        e.addEventListener('click', () => meetVisitor(e));
-        road.appendChild(e);
-      } else visitor = null;
+    if (visitor && !$('#mapworld .visitor')) {
+      const e = el('button', 'visitor', visitor.v.e);
+      e._v = visitor;
+      e.style.left = visitor.x + 'px'; e.style.top = visitor.y + 'px';
+      e.addEventListener('click', () => meetVisitor(e));
+      mapWorld.appendChild(e);
     }
   }
-  function doRescue(block, spot) {
+  function doRescue(spot) {
     if (busyRescue || !cityEv) return;
     busyRescue = true; ac();
-    const r = cityEv.r;
+    const ev = cityEv, r = ev.r;
+    // the crew sets off from the Town Hall and races to the call
     const z = el('div', 'zoomer' + (r.ride === '🚁' ? ' air' : ''), `<span>${r.ride}</span><b>${face(r.crew)}</b>`);
-    z.style.setProperty('--to', cityEv.x + '%');
-    block.appendChild(z);
-    if (r.ride === '🚁') tone(90, 1.2, 'sawtooth', 0.05); else [0, 0.35, 0.7].forEach(d => { tone(960, 0.18, 'square', 0.05, null, d); tone(720, 0.18, 'square', 0.05, null, d + 0.18); });
+    z.style.left = '500px'; z.style.top = '640px';
+    mapWorld.appendChild(z);
+    requestAnimationFrame(() => requestAnimationFrame(() => { z.style.left = (ev.x - 30) + 'px'; z.style.top = (ev.y - 10) + 'px'; }));
+    if (r.ride === '🚁') tone(90, 1.2, 'sawtooth', 0.05);
+    else [0, 0.35, 0.7].forEach(d => { tone(960, 0.18, 'square', 0.05, null, d); tone(720, 0.18, 'square', 0.05, null, d + 0.18); });
     setTimeout(() => {
       spot.innerHTML = '<span>✅</span>';
       const amt = townReward(40);
       payBank(amt); S.city.rescues = (S.city.rescues || 0) + 1; save();
       confetti(60); sfx.coin(); toast(`${r.ride} +${fmt(amt)} 💰`);
       quip(r.line);
-      setTimeout(() => { z.remove(); spot.remove(); cityEv = null; busyRescue = false; refreshUI(); }, 1200);
-    }, 1300);
+      setTimeout(() => { z.remove(); spot.remove(); cityEv = null; busyRescue = false; refreshUI(); }, 1300);
+    }, 1400);
   }
   function meetVisitor(e) {
     if (!visitor) return;
@@ -1369,22 +1750,21 @@
   const DAY_LEN = 360;
   function dayPhase() { return (Date.now() / 1000 % DAY_LEN) / DAY_LEN; }
   function dayNight() {
-    const p = dayPhase(), box = $('#city');
+    const p = dayPhase();
     const night = p > 0.68 && p < 0.93, dusk = (p > 0.6 && p <= 0.68) || p >= 0.93;
-    box.classList.toggle('night', night);
-    box.classList.toggle('dusk', dusk);
-    const sky = $('#city .skyicon');
+    mapView.classList.toggle('night', night);
+    mapView.classList.toggle('dusk', dusk);
+    const sky = $('#navbar .skyicon');
     if (sky) sky.textContent = night ? '🌙' : dusk ? '🌇' : '☀️';
   }
-
   // every frame: called from the main loop
   function cityTick(dt) {
-    if (view !== 'city' || document.hidden) return;
+    if (document.hidden) return;
     cityT += dt;
     if (cityT < 1) return;
     cityT = 0;
     dayNight();
-    updateTips();
+    if (view !== 'city' || openK >= 0) return;
     if (talking || !$('#modal').classList.contains('hidden') || S.play.lock) return;
     const now = Date.now();
     if (cityEv && now > cityEv.until && !busyRescue) { cityEv = null; attachCityThings(); }
@@ -1392,28 +1772,11 @@
     if (!cityEv && Math.random() < 1 / 20) spawnRescue();
     if (!visitor && Math.random() < 1 / 30) spawnVisitor();
   }
-  // first visit to a newly opened place gets a hello
+  // first time a new place opens: a hello (and the map asks where to build it)
   function cityHellos() {
     if (garageOpen() && !S.city.hi.garage) { S.city.hi.garage = 1; save(); quip('o_garage'); return true; }
     if (foodOpen() && !S.city.hi.food) { S.city.hi.food = 1; save(); quip('o_food'); return true; }
     return false;
-  }
-
-  // the world's buildings stand in a little town; bought ones appear, the next one is for sale
-  const PLOTS = [[13, 70], [27, 40], [73, 40], [87, 70], [50, 78], [50, 24]];
-  function buildFarm() {
-    const c = $('#buildings');
-    c.innerHTML = `<div class="farm-title" id="farmTitle"></div><div class="town" id="town"><div class="hill"></div>
-      <span class="tdeco" style="left:3%;top:12%">☁️</span><span class="tdeco" style="left:84%;top:6%">☁️</span>
-      <span class="tdeco" style="left:40%;top:52%">🌳</span><span class="tdeco" style="left:60%;top:58%">🌳</span></div>`;
-    const town = c.querySelector('.town');
-    BUILD.forEach((b, i) => {
-      const t = el('button', 'plot', `<span class="be">${b.e}</span><span class="bn">${b.n}</span><span class="bfx">${b.fx}</span><span class="bp">💰${fmt(b.cost)}</span><span class="sign">🪧</span>`);
-      t.style.left = PLOTS[i][0] + '%'; t.style.top = PLOTS[i][1] + '%';
-      if (i === 5) t.classList.add('big');
-      t.addEventListener('click', () => buyBuilding(i, t));
-      town.appendChild(t); B_EL[i] = t;
-    });
   }
 
   // ---------- buying ----------
@@ -1455,29 +1818,14 @@
     if (G.lanes[k - 1].sold < u.need || G.coins < u.cost) return shake(btn);
     G.coins -= u.cost;
     G.lanes[k].u = true;
-    unlockWorlds();
-    renderLanes(); renderMap(); refreshUI(); save();
-    celebrate(ANIMALS[k].a, 0, ANIMALS[k].p);
-    setTimeout(() => { if (S.silly) sfx.partyHorn(); laneVoice(k, true); }, 900);
-    setTimeout(() => RT[k].el && RT[k].el.sec.scrollIntoView({ behavior: 'smooth', block: 'center' }), 300);
-  }
-
-  function buyBuilding(i, t) {
-    ac();
-    if (G.b[i]) { // owned: wiggle and show what it does
-      t.classList.remove('wiggle'); void t.offsetWidth; t.classList.add('wiggle');
-      sfx.boing();
-      const f = el('div', 'float big', BUILD[i].fx);
-      f.style.left = PLOTS[i][0] + '%'; f.style.top = (PLOTS[i][1] - 18) + '%';
-      $('#town').appendChild(f); setTimeout(() => f.remove(), 1150);
-      return;
-    }
-    const next = G.b.indexOf(false);
-    if (i !== next || G.coins < BUILD[i].cost) return shake(t);
-    G.coins -= BUILD[i].cost; G.b[i] = true;
-    refreshUI(); save();
-    celebrate(BUILD[i].e, 0, i === 5 ? WD[S.cur].done + '!' : BUILD[i].fx);
-    if (i === 5) setTimeout(() => confetti(260), 600);
+    const opened = unlockWorlds();
+    lockEl = null; closeModal(); save();
+    construct(`[data-pen="${k}"]`, () => {
+      renderCurrent(); renderNav(); shownCoins = -1; refreshUI();
+      celebrate(ANIMALS[k].a, 0, ANIMALS[k].p);
+      setTimeout(() => { if (S.silly) sfx.partyHorn(); laneVoice(k, true); }, 900);
+      if (opened) setTimeout(() => { toast('📍 🗺️'); setView('city'); }, 3200);
+    });
   }
 
   // ---------- UI refresh (4x per second) ----------
@@ -1494,8 +1842,8 @@
 
   let shownCoins = -1, shownStars = -1;
   function refreshUI() {
-    const c = Math.floor(G.coins);
-    if (c !== shownCoins) { $('#coins').textContent = fmt(c); shownCoins = c; }
+    const cw = view === 'city' && openK < 0 ? BANK : S.cur, c = Math.floor(S.worlds[cw].coins);
+    if (c !== shownCoins) { $('#coins').textContent = fmt(c); $('#coinWorld').textContent = WD[cw].icon; shownCoins = c; }
     const st = starCount();
     if (st !== shownStars) { $('#stars').textContent = st; shownStars = st; }
 
@@ -1528,20 +1876,7 @@
       lockEl.querySelector('.bigbtn').classList.toggle('can', met && G.coins >= u.cost);
     }
 
-    const next = G.b.indexOf(false);
-    B_EL.forEach((t, i) => {
-      const cls = 'plot' + (i === 5 ? ' big' : '') + ' ' + (G.b[i] ? 'owned' : i === next ? 'next' + (G.coins >= BUILD[i].cost ? ' can' : '') : 'future');
-      if (t._cls !== cls) { t.className = cls; t._cls = cls; }
-    });
-    const title = $('#farmTitle');
-    const D = WD[S.cur];
-    const tHtml = G.b[5] ? `👑 <span class="gt">${D.done}</span> 👑` : `${D.t1} ${D.title} ${D.t1}`;
-    if (title._h !== tHtml) { title.innerHTML = tHtml; title._h = tHtml; }
-    title.classList.toggle('company', G.b[5]);
-    S.worlds.forEach((g, w) => {
-      const b = mapEl.children[w];
-      if (b && g.u) b.lastChild.textContent = fmt(g.coins);
-    });
+    liveMap();
     refreshMapBtn();
   }
 
@@ -1641,19 +1976,22 @@
     return { items: flow, coins: flow * WD[w].lanes[k].price * mult(w) * (1 + 0.5 * truckShare) };
   }
   // run a world's automation for `secs` without animating it; returns coins earned
-  function simWorld(w, secs, eff) {
-    const g = S.worlds[w];
-    let coins = 0;
-    g.lanes.forEach((L, k) => {
-      if (!L.u) return;
-      const r = laneRate(w, k);
-      if (!r) { L.g = Math.min(penCap(L), L.g + L.n * secs / prodTime(k, w)); return; }
-      coins += r.coins * secs * eff;
-      L.sf = (L.sf || 0) + r.items * secs * eff;
-      const whole = Math.floor(L.sf);
-      L.sf -= whole; L.sold += whole;
-    });
+  function simLane(w, k, secs, eff) {
+    const g = S.worlds[w], L = g.lanes[k];
+    if (!L.u) return 0;
+    const r = laneRate(w, k);
+    if (!r) { L.g = Math.min(penCap(L), L.g + L.n * secs / prodTime(k, w)); return 0; }
+    const coins = r.coins * secs * eff;
+    L.sf = (L.sf || 0) + r.items * secs * eff;
+    const whole = Math.floor(L.sf);
+    L.sf -= whole; L.sold += whole;
     g.coins += coins; g.total += coins;
+    return coins;
+  }
+  // run a world's automation for `secs` without animating it; returns coins earned
+  function simWorld(w, secs, eff) {
+    let coins = 0;
+    for (let k = 0; k < 6; k++) coins += simLane(w, k, secs, eff);
     return coins;
   }
   function applyOffline() {
@@ -1764,10 +2102,11 @@
   function reloadAll() {
     celQueue.length = 0;
     bindWorld(); resetRT(); applyTheme();
-    buildFarm(); renderLanes(); renderMap();
+    closeLane(true);
     silentAch();
+    autoPlaceLegacy();
     startStory(); renderQuest();
-    if (view === 'city') renderCity();
+    setView(view === 'district' && G.lanes[0].u && placed('w' + S.cur) ? 'district' : 'city');
     shownCoins = -1; shownStars = -1; refreshUI(); updateProfBtn();
   }
   function updateProfBtn() { $('#profAv').textContent = curProfile().av; }
@@ -2276,6 +2615,7 @@
     bgT += dt;
     if (bgT >= 1) {
       S.worlds.forEach((g, w) => { if (g.u && w !== S.cur) simWorld(w, bgT, S.wonders.train ? 2 : 1); });
+      G.lanes.forEach((L, k) => { if (L.u && !RT[k].el) simLane(S.cur, k, bgT, 1); });
       bgT = 0;
     }
     updatePlay(dt);
@@ -2313,13 +2653,10 @@
 
   // ---------- start ----------
   applyTheme();
-  buildFarm();
-  renderLanes();
-  renderMap();
   silentAch();
   updateProfBtn();
-  refreshUI();
   applyOffline();
+  autoPlaceLegacy();
   setView('city');
   startStory();
   renderQuest();
@@ -2332,7 +2669,7 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
-  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, goWorld, sync, setView, showWonder, WONDERS, spawnRescue: () => spawnRescue(), spawnVisitor: () => spawnVisitor(), RIDES, FOOD, get talking() { return talking; }, authInit, accountSync, openGrownups,
+  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, goWorld, goQuest: q => goQuest(QUESTS[q]), openLane, closeLane: () => closeLane(), placeHere, needPlacing, get view() { return view; }, sync, setView, showWonder, WONDERS, spawnRescue: () => spawnRescue(), spawnVisitor: () => spawnVisitor(), RIDES, FOOD, get talking() { return talking; }, authInit, accountSync, openGrownups,
     // test hook: render sounds into an OfflineAudioContext
     audio: { VOICES, fart, sfx, voice(n) { voiceGain = VOICE_GAIN[n] || 1; VOICES[n](); voiceGain = 1; }, useContext(ctx) { AC = ctx; OUT = ctx.destination; NOISE = null; } } }; // handy for debugging
 })();
