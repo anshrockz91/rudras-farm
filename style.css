@@ -932,3 +932,68 @@ main { padding-bottom: 0; }
 .ianim { position: absolute; pointer-events: none; background-repeat: no-repeat; background-position: 0 0; animation: ianim 1s steps(var(--frames, 6)) infinite; }
 @keyframes ianim { to { background-position: calc(var(--fw) * var(--frames, 6) * -1) 0; } }
 .isp.ianimal.swim { animation-duration: 1.4s; }
+
+/* ----- isometric city ----- */
+.isocity .cplot, .isocity .wslot, .isocity .hall { background: transparent; border: 0; border-radius: 0; box-shadow: none; padding: 0; overflow: visible; min-width: 0; animation: none; }
+.isocity .cplot.pick, .isocity .wslot.ready { background: rgba(255, 200, 61, .32); animation: blink 1.1s steps(2) infinite; }
+.isocity .cplot.here { background: rgba(255, 216, 77, .28); }
+.isocity .wslot.focus { background: rgba(255, 200, 61, .45); animation: blink .8s steps(2) infinite; }
+.isocity .cplot .site, .isocity .wslot .site { border-radius: 0; background: rgba(240, 230, 210, .8); font-size: 90px; }
+.ilabel.big { font-size: 36px; padding: 4px 20px; border-radius: 999px; box-shadow: 0 4px 0 rgba(0, 0, 0, .14); }
+.ilabel.big.free { background: rgba(255, 255, 255, .8); color: #5b6b3a; }
+.ilabel.ready { background: #fff3b0; animation: bump 1.2s infinite; }
+.iarrow { position: absolute; transform: translateX(-50%); font-size: 70px; z-index: 2600; pointer-events: none; animation: tap .7s infinite; }
+.ihallface { position: absolute; transform: translateX(-50%); font-size: 44px; background: #fff; border-radius: 50%; width: 70px; height: 70px; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, .15); z-index: 2500; pointer-events: none; animation: bob 1s ease-in-out infinite alternate; }
+.ftip { position: absolute; transform: translateX(-50%); font-size: 24px; font-weight: 700; background: #fff; border-radius: 999px; padding: 0 10px; pointer-events: none; }
+.ftip:empty { display: none; }
+.ftip.full { background: #ffe14d; animation: bump 1s infinite; }
+.ilampglow { position: absolute; width: 26px; height: 26px; margin-left: -13px; border-radius: 50%; background: #ffe14d; opacity: 0; z-index: 2300; pointer-events: none; transition: opacity 1s; }
+#mapview.night .ilampglow, #mapview.dusk .ilampglow { opacity: 1; box-shadow: 0 0 30px 12px rgba(255, 225, 77, .7); }
+.isp.imover { transition: none; }
+.flyover.iso { animation-name: flyiso; font-size: 80px; z-index: 2700; }
+@keyframes flyiso { from { transform: translateX(-160px); } to { transform: translateX(var(--fx)); } }
+.isoworld { z-index: 1; }  /* its own layer, so the night veil, clouds and rescues sit on top */
+#mapworld.isomap .cev { width: 120px; height: 120px; font-size: 72px; z-index: 2800; }
+#mapworld.isomap .visitor { font-size: 90px; z-index: 2800; }
+#mapworld.isomap .zoomer { font-size: 84px; z-index: 2850; }
+
+/* ----- "how do I unlock this?" messages in plain words ----- */
+.toast { white-space: normal; max-width: min(92vw, 640px); width: max-content; text-align: center; font-size: clamp(18px, 4.6vw, 24px); line-height: 1.3; }
+.locktitle { margin: 0; font-size: clamp(22px, 5.5vw, 30px); text-align: center; }
+.lsteps { width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 8px; }
+.lstep { display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 16px; padding: 8px 12px; font-size: clamp(16px, 4.2vw, 20px); text-align: left; }
+.lstep .ln { flex: none; width: 30px; height: 30px; border-radius: 50%; background: #ffc83d; color: #5a3d00; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.lstep .lt { flex: 1; }
+.lstep .gtxt, .lstep .ctxt { flex: none; font-size: 15px; color: #666; min-width: 0; text-align: right; }
+.lsteps .goal { padding: 0 6px; font-size: 24px; }
+.lockwhy { font-size: clamp(16px, 4.2vw, 20px); font-weight: 700; color: #b5651d; text-align: center; }
+.lock.ready .lockwhy { color: #2e9e4f; }
+.needlist { display: flex; flex-direction: column; gap: 6px; width: 100%; max-width: 460px; margin: 6px auto 10px; text-align: left; }
+.needhead { font-weight: 800; font-size: 18px; color: #555; }
+.needrow { display: flex; align-items: center; gap: 10px; border-radius: 14px; padding: 8px 12px; font-size: clamp(15px, 4vw, 18px); font-weight: 700; }
+.needrow.ok { background: #dcf7c9; } .needrow.no { background: #fff0d6; }
+.needrow .nk { flex: none; font-size: 22px; }
+.needrow small { display: block; font-weight: 600; color: #8a6a3a; font-size: 14px; }
+.needtip { font-size: 16px; color: #8a6a3a; margin-bottom: 8px; }
+.ipenlock { width: 180px; }
+.ipenlock em { font-style: normal; font-size: 19px; font-weight: 800; background: #fff; border-radius: 12px; padding: 2px 10px; margin: 2px 0; white-space: nowrap; box-shadow: 0 3px 0 rgba(0, 0, 0, .12); }
+.ipenlock.next em { background: #fff3b0; }
+.lockmsg { margin: 10px 0 18px; font-size: 18px; font-weight: 700; text-align: center; color: #6a5a40; }
+.rideb.locked .rn { font-size: 12px; white-space: normal; line-height: 1.15; }
+
+/* ----- business screen with the 3D sprites ----- */
+.isolane .scene { background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='32'%3E%3Cpath d='M32 0L64 16L32 32L0 16Z' fill='%2393d35f'/%3E%3Cpath d='M0 0H32L0 16ZM32 0H64V16ZM0 16V32H32ZM64 16V32H32Z' fill='%238ccb58'/%3E%3C/svg%3E") 0 0 / 64px 32px; }
+.isolane .pen { background: var(--dirt, #e9cf94) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='64' height='32'%3E%3Cpath d='M32 0L64 16L32 32L0 16Z' fill='rgba(255,255,255,.12)'/%3E%3C/svg%3E") 0 0 / 64px 32px; }
+.lspr { display: block; pointer-events: none; user-select: none; }
+.lani { height: clamp(42px, 10.5vw, 68px); width: auto; }
+.lperson { height: clamp(40px, 9vw, 60px); width: auto; }
+.ltruck { height: clamp(46px, 11vw, 74px); width: auto; }
+.ldeco { height: clamp(44px, 10vw, 76px); width: auto; transform: translate(-30%, -40%); }
+.isolane .actor .body { display: inline-block; }
+.isolane .counter::before, .isolane .counter::after, .isolane .counter .awning { display: none; }
+.lstall { position: absolute; left: 50%; bottom: 8%; height: 100%; width: auto; transform: translateX(-50%); z-index: 1; }
+.isolane .table { background: none; box-shadow: none; height: 34%; }
+.isolane .cashier { bottom: 36%; z-index: 0; }
+.isolane .animal { font-size: clamp(22px, 5vw, 32px); }
+.rideb .rn small { display: block; font-size: 13px; }

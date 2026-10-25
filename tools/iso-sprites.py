@@ -30,8 +30,8 @@ def cyl(rt, rb, h, p, color, seg=16, **k):
     d.update(k)
     return d
 
-def cone(r, h, p, color, seg=16, **k):
-    d = {'cone': [r, h, seg], 'p': list(p), 'color': color}
+def cone(rad, h, p, color, seg=16, **k):
+    d = {'cone': [rad, h, seg], 'p': list(p), 'color': color}
     d.update(k)
     return d
 
@@ -250,6 +250,77 @@ def moonrock():
             box((0.6, 0.42, 0.5), (0.05, 0.6, 0.05), Y, r=25), box((0.1, 0.1, 0.03), (0.1, 0.65, 0.32), Yd, r=25), box((0.12, 0.12, 0.03), (-0.12, 0.5, 0.29), Yd, r=25),
             box((0.12, 0.1, 0.03), (0.22, 0.75, -0.1), Yd, r=115), box((0.32, 0.22, 0.26), (0.55, 0.36, 0.3), Y, r=-30)]
 
+def shift(parts, dx, dz):
+    return [dict(q, p=[q['p'][0] + dx, q['p'][1], q['p'][2] + dz]) for q in parts]
+
+def townhall():
+    W, C, R, G, Dk = '#f6f1e6', '#ffffff', '#d9534f', '#ffd84d', '#7a6a58'
+    parts = [box((3.0, 0.15, 2.0), (0, 0.075, 0), '#cfc6b4'), box((2.6, 0.12, 0.5), (0, 0.06, 1.15), '#e5dccb'), box((2.6, 0.12, 0.3), (0, 0.18, 1.0), '#e5dccb'),
+             box((2.6, 1.0, 1.4), (0, 0.65, -0.15), W), box((2.8, 0.12, 1.6), (0, 1.21, -0.1), '#e8e0cf')]
+    parts += [cyl(0.08, 0.08, 0.95, (-1.1 + i * 0.44, 0.7, 0.72), C) for i in range(6)]
+    parts += [box((2.7, 0.12, 0.25), (0, 1.2, 0.75), '#e8e0cf'), box((2.7, 0.06, 0.06), (0, 1.0, 0.82), G)]
+    for i in range(5):  # stepped pediment
+        parts.append(box((2.6 - i * 0.5, 0.1, 0.2), (0, 1.32 + i * 0.1, 0.75), '#e8e0cf'))
+    parts += [box((0.7, 1.0, 0.7), (0, 1.8, -0.2), W), box((0.78, 0.1, 0.78), (0, 2.3, -0.2), '#e8e0cf'), cyl(0.22, 0.22, 0.04, (0, 1.95, 0.16), C, rx=90),
+              cyl(0.18, 0.18, 0.05, (0, 1.95, 0.17), '#3b3b3b', rx=90), box((0.03, 0.14, 0.02), (0, 2.0, 0.2), C), cone(0.5, 0.6, (0, 2.65, -0.2), R, seg=4, r=45),
+              cyl(0.02, 0.02, 0.5, (0, 3.1, -0.2), Dk), box((0.3, 0.18, 0.02), (0.15, 3.25, -0.2), '#3d8bff'), box((0.4, 0.55, 0.05), (0, 0.42, 0.53), '#8a5a2b')]
+    parts += [box((0.3, 0.3, 0.04), (x, 0.75, 0.53), '#8fd3ff') for x in (-0.8, -0.4, 0.4, 0.8)]
+    return parts
+
+def carousel(angle):
+    cols = ['#ff5a5a', '#3d8bff', '#ffd84d', '#4cd964', '#ff7eb6', '#a259ff']
+    parts = [cyl(1.0, 1.05, 0.18, (0, 0.09, 0), '#c084fc'), cyl(0.12, 0.12, 1.5, (0, 0.9, 0), '#ffd84d'),
+             cyl(1.05, 1.05, 0.12, (0, 1.55, 0), '#ffffff'), cone(1.15, 0.6, (0, 1.9, 0), '#ff5a5a', seg=12), cone(0.6, 0.32, (0, 2.08, 0), '#ffffff', seg=12),
+             sphere(0.1, (0, 2.3, 0), '#ffd84d')]
+    for i in range(6):
+        a = math.radians(angle + i * 60)
+        x, z = math.cos(a) * 0.72, math.sin(a) * 0.72
+        bob = 0.08 * math.sin(math.radians(angle * 6 + i * 120))
+        parts += [cyl(0.025, 0.025, 1.4, (x, 0.85, z), '#ffd84d'), box((0.16, 0.2, 0.4), (x, 0.65 + bob, z), cols[i], r=-math.degrees(a)),
+                  box((0.1, 0.18, 0.12), (x + math.cos(a + 1.57) * 0.2, 0.82 + bob, z + math.sin(a + 1.57) * 0.2), cols[i], r=-math.degrees(a))]
+    return parts
+
+def statue():
+    S1, S2, Au = '#d8d2c4', '#c4bdae', '#ffcc33'
+    return [box((1.5, 0.2, 1.5), (0, 0.1, 0), S2), box((1.1, 0.5, 1.1), (0, 0.45, 0), S1), box((1.25, 0.1, 1.25), (0, 0.75, 0), S2),
+            box((0.5, 0.12, 0.03), (0, 0.45, 0.56), Au), {'u': M + 'chars/character-male-a.glb', 'p': [0, 0.8, 0], 's': 1.9, 'tint': Au},
+            box((0.08, 0.6, 0.08), (0.42, 1.55, 0.05), Au, rz=-20), cone(0.12, 0.25, (0.53, 1.95, 0.05), '#ff9a3c'), sphere(0.08, (0.53, 2.1, 0.05), '#ffe27a')]
+
+def garage():
+    W, Dk, O = '#e9edf2', '#59606b', '#ff8a3d'
+    parts = [box((2.4, 0.08, 1.8), (0, 0.04, 0.1), '#9aa0a8'), box((2.2, 0.9, 1.1), (0, 0.5, -0.25), W), box((2.3, 0.1, 1.2), (0, 0.98, -0.25), Dk),
+             box((1.4, 0.3, 0.06), (0, 1.15, 0.33), O), box((1.2, 0.18, 0.07), (0, 1.15, 0.35), '#ffffff')]
+    for i in range(3):
+        x = -0.7 + i * 0.7
+        parts += [box((0.55, 0.62, 0.04), (x, 0.36, 0.31), '#b8c0cc')] + [box((0.55, 0.02, 0.05), (x, 0.1 + j * 0.1, 0.32), '#8f97a3') for j in range(6)]
+    parts += [box((0.22, 0.45, 0.18), (0.8, 0.27, 0.75), '#e53935'), box((0.16, 0.12, 0.03), (0.8, 0.38, 0.85), '#ffffff'), box((0.5, 0.05, 0.4), (0.8, 0.6, 0.75), Dk),
+              cyl(0.03, 0.03, 0.55, (0.6, 0.3, 0.75), Dk), cyl(0.03, 0.03, 0.55, (1.0, 0.3, 0.75), Dk)]
+    return parts
+
+def station():
+    W, R, Dk = '#f3e6cf', '#b5523b', '#5b5b5b'
+    return [box((3.0, 0.18, 0.9), (0, 0.09, 0.45), '#c9c2b5'), box((3.0, 0.03, 0.06), (0, 0.19, 0.88), '#ffd84d'), box((1.8, 0.85, 0.8), (0, 0.6, -0.35), W),
+            box((2.0, 0.08, 1.0), (0, 1.05, -0.35), Dk), box((1.9, 0.3, 0.9), (0, 1.2, -0.35), R, rx=0), box((0.5, 0.45, 0.04), (0, 0.42, 0.06), '#8a5a2b'),
+            *[box((0.28, 0.28, 0.04), (x, 0.65, 0.06), '#8fd3ff') for x in (-0.6, 0.6)], cyl(0.16, 0.16, 0.04, (0, 1.2, 0.1), '#ffffff', rx=90),
+            *[cyl(0.04, 0.04, 0.8, (x, 0.58, 0.8), Dk) for x in (-1.2, -0.4, 0.4, 1.2)], box((2.8, 0.06, 0.6), (0, 1.0, 0.6), R),
+            {'u': M + 'train/train-locomotive-a.glb', 'p': [-0.6, 0, 1.6], 'r': 90}, {'u': M + 'train/train-carriage-box.glb', 'p': [0.75, 0, 1.6], 'r': 90}]
+
+def bigcastle():
+    parts = [x for (cx, cz) in ((0, 0), (2, 0), (0, 2), (2, 2)) for x in (m('castle', 'tower-square-base', (cx, 0, cz)), m('castle', 'tower-square-mid', (cx, 1, cz)),
+             m('castle', 'tower-square-top-roof', (cx, 2, cz)), m('castle', 'flag-pennant', (cx, 3.1, cz)))]
+    parts += [m('castle', 'wall', (1, 0, 0)), m('castle', 'wall', (1, 0, 2)), m('castle', 'wall', (0, 0, 1), 90), m('castle', 'wall', (2, 0, 1), 90), m('castle', 'gate', (1, 0, 2.05)),
+              m('castle', 'tower-square-base', (1, 0, 1)), m('castle', 'tower-square-mid-windows', (1, 1, 1)), m('castle', 'tower-square-mid-windows', (1, 2, 1)),
+              m('castle', 'tower-square-mid-windows', (1, 3, 1)), m('castle', 'tower-square-top-roof-high', (1, 4, 1)), m('castle', 'flag', (1, 5.2, 1))]
+    return parts
+
+def spacecenter():
+    return shift(bigrocket(), 0.5, -0.4) + shift(dish(20), -0.9, 0.5) + [box((2.6, 0.06, 2.2), (0, 0.03, 0), '#9aa0a8')]
+
+def plinth():
+    S1, Au = '#d8d2c4', '#ffd84d'
+    return [box((1.6, 0.16, 1.6), (0, 0.08, 0), S1), *[cyl(0.06, 0.06, 0.45, (x, 0.38, z), '#c4bdae') for x in (-0.7, 0.7) for z in (-0.7, 0.7)],
+            *[box((1.4, 0.03, 0.03), (0, 0.5, z), Au) for z in (-0.7, 0.7)], *[box((0.03, 0.03, 1.4), (x, 0.5, 0), Au) for x in (-0.7, 0.7)]]
+
 def windmill(bladeAngle):
     return [m('town', 'wall-block', (0, 0, 0)), m('town', 'wall-block', (0, 1, 0)), m('town', 'wall-wood-block', (0, 2, 0)),
             m('town', 'roof-point', (0, 3, 0)), m('town', 'windmill', (0.6, 2.5, 0), 90, rx=bladeAngle)]
@@ -359,6 +430,18 @@ JOBS = {
     's_astro': ([{'u': M + 'space/astronautA.glb', 'p': [0, 0, 0]}], 1.1, 0), 's_astro2': ([{'u': M + 'space/astronautB.glb', 'p': [0, 0, 0]}], 1.1, 0),
     's_fence_x': ([{'u': M + 'space/rail_middle.glb', 'p': [0, 0, 0]}], 1.0, 0), 's_fence_y': ([{'u': M + 'space/rail_middle.glb', 'p': [0, 0, 0], 'r': 90}], 1.0, 0),
     's_stall': (habitat('pods', '#ffd23f'), 0.45, 0), 's_rocket': (bigrocket(), 0.75, 0),
+    # ---- City map (c_) ----
+    'c_hall': (townhall(), 0.85, 0), 'c_garage': (garage(), 0.85, 0), 'c_station': (station(), 0.7, 0), 'c_castle': (bigcastle(), 0.5, 0),
+    'c_space': (spacecenter(), 0.6, 0), 'c_statue': (statue(), 0.75, 0), 'c_plinth': (plinth(), 0.8, 0),
+    **{f'c_fair{i}': (carousel(i * 10), 0.75, 0) for i in range(6)},
+    'c_diner': ([m('com', 'building-b'), m('com', 'detail-awning-wide', (0, 0, 0.5)), m('com', 'detail-parasol-a', (-0.4, 0, 0.95)), m('com', 'detail-parasol-b', (0.45, 0, 0.95))], 1.2, 0),
+    'c_cafe': ([m('com', 'building-e'), m('com', 'detail-awning', (0, 0, 0.5)), m('com', 'detail-parasol-a', (0.3, 0, 0.95))], 1.2, 0),
+    **{f'c_{v}_{f}': ([m('cars', src)], 0.5, yaw) for v, src in (('taxi', 'taxi'), ('police', 'police'), ('fire', 'firetruck'), ('amb', 'ambulance'), ('sedan', 'sedan'), ('sports', 'sedan-sports'), ('lux', 'suv-luxury'), ('truck', 'truck'))
+       for f, yaw in (('r', 90), ('l', -90))},
+    **{f'c_{v}_{f}': ([m('train', src)], 0.55, yaw) for v, src in (('loco', 'train-locomotive-a'), ('wagon', 'train-carriage-box'), ('wagon2', 'train-carriage-container-red'))
+       for f, yaw in (('r', 90), ('l', -90))},
+    'c_lamp': ([m('town', 'lantern')], 1.0, 0), 'c_tree': ([m('town', 'tree-high-round')], 1.2, 0), 'c_tree2': ([m('town', 'tree')], 1.2, 0),
+    'c_sign': ([m('surv', 'signpost'), m('cars', 'cone', (0.4, 0, 0.3)), m('cars', 'cone', (-0.35, 0, 0.35))], 1.1, 0),
     # windmill: 6 frames of the blades turning (they repeat every 90 degrees)
     **{f'windmill{i}': (windmill(i * 15), 0.8, 0) for i in range(6)},
 }
@@ -394,7 +477,7 @@ with sync_playwright() as p:
     b.close()
 # animations: frames named <base>0..<base>5 become one horizontal strip lined up on the ground anchor
 import re
-bases = sorted({re.match(r'^(.*?)(\d+)$', n).group(1) for n in JOBS if re.match(r'^(z_wheel|z_coaster|s_dish|windmill)\d+$', n)})
+bases = sorted({re.match(r'^(.*?)(\d+)$', n).group(1) for n in JOBS if re.match(r'^(z_wheel|z_coaster|s_dish|c_fair|windmill)\d+$', n)})
 for base in bases:
     fr = sorted((n for n in meta if re.fullmatch(re.escape(base) + r'\d+', n)), key=lambda n: int(n[len(base):]))
     L = max(meta[f]['ax'] for f in fr); R = max(meta[f]['w'] - meta[f]['ax'] for f in fr)
