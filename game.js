@@ -848,12 +848,13 @@
   function renderNav() {
     const nav = $('#navbar'), D = WD[S.cur];
     nav.innerHTML = view === 'city'
-      ? `<span class="navtitle"><span class="skyicon">☀️</span> ${esc(townName())}</span><span class="navhint">${needPlacing().length ? '📍' : '👆'}</span>`
-      : `<button class="navback" id="navBack">⬅️ 🏙️</button><span class="navtitle">${D.icon} ${esc(G.b[5] ? D.done : D.title)}</span>`;
+      ? `<span class="navtitle"><span class="skyicon">☀️</span><span class="wxicon"></span> ${esc(townName())}</span><span class="navhint">${needPlacing().length ? '📍' : '👆'}</span>`
+      : `<button class="navback" id="navBack">⬅️ 🏙️</button><span class="navtitle"><span class="wxicon"></span>${D.icon} ${esc(G.b[5] ? D.done : D.title)}</span>`;
     const b = $('#navBack');
     if (b) b.onclick = () => { ac(); sfx.pop(); setView('city'); };
     refreshMapBtn();
     layoutMap();
+    wxShown = '';
   }
   function setView(v, focus) {
     if (openK >= 0) closeLane(true);
@@ -1368,21 +1369,35 @@
     const deco = [[30, 470, 0], [870, 470, 1], [20, 780, 1], [880, 790, 0], [300, 168, 0], [600, 168, 1]]
       .map(([x, y, i]) => `<span class="ddeco" style="left:${x}px;top:${y}px">${D.lanes[i].deco[i]}</span>`).join('');
     const extra = w === 0 ? `<span class="dbig" style="left:822px;top:120px">${SVGS.windmill()}</span>`
-      : w === 2 ? '<span class="pond" style="left:20px;top:150px"></span>'
+      : w === 2 ? '<span class="pond" style="left:20px;top:150px"><i class="duck">🦆</i><i class="duck d2">🦆</i></span>'
       : w === 4 ? '<span class="crater" style="left:30px;top:140px"></span><span class="crater c2" style="left:840px;top:430px"></span>' : '';
     const tier = Math.max(...g.lanes.map(L => L.truck));
     const car = tier ? `<span class="dcar"><span>${VEH[w][tierOf(tier)]}</span></span>` : '';
     return `<div class="dground g${w}" style="--g1:${D.lanes[0].tint};--g2:${D.bg[3]}">
-      <svg class="droads" viewBox="0 0 ${DW} ${DH}" preserveAspectRatio="none"><path d="M0,168 H${DW} M0,470 H${DW} M300,168 V${DH} M600,168 V${DH}" stroke="#9a9a9a" stroke-width="30" fill="none"/>
+      <svg class="droads" viewBox="0 0 ${DW} ${DH}" preserveAspectRatio="none"><path d="M0,168 H${DW} M0,470 H${DW} M300,168 V${DH} M600,168 V${DH}" stroke="#e3dccb" stroke-width="46" fill="none"/>
+      <path d="M0,168 H${DW} M0,470 H${DW} M300,168 V${DH} M600,168 V${DH}" stroke="#9a9a9a" stroke-width="30" fill="none"/>
       <path d="M0,470 H${DW}" stroke="#fff" stroke-width="3" stroke-dasharray="14 12" fill="none"/></svg>
-      ${extra}${deco}<div class="dstreet">${car}</div>${shops}${slots}${pens}
+      ${extra}${deco}<div class="dstreet">${car}</div>${shops}${mini ? '' : shoppers(w)}${slots}${pens}${mini || w > 1 ? '' : '<span class="fly1">🦋</span><span class="fly1 b2">🦋</span>'}
       ${mini ? '' : `<div class="dname">${D.icon} ${esc(g.b[5] ? D.done : D.title)}</div>`}</div>`;
+  }
+  // people walk along the shop street, pop into an open shop and come out with a bag
+  function shoppers(w) {
+    const open = QUESTS.filter(q => q.shop && questDistrict(q) === w).map((q, i) => helpedQuest(q) ? i : -1).filter(i => i >= 0);
+    if (!open.length) return '';
+    const folk = ['🚶', '🚶‍♀️', '🧑', '👩', '👴', '👧'];
+    return open.slice(0, 4).map((i, n) => `<span class="shopper" style="--to:${75 + i * 125 - 20}px;animation-duration:${9 + n * 2}s;animation-delay:-${n * 2.7}s">
+      <b>${folk[(n + w) % folk.length]}</b><i>🛍️</i></span>`).join('');
+  }
+  // clouds (with their shadows on the ground) and birds over a map
+  function skyLife() {
+    return [0, 1, 2].map(i => `<div class="cloud c${i}"><span>☁️</span><b class="shade"></b></div>`).join('')
+      + '<div class="birds"><i>🐦</i><i>🐦</i><i>🐦</i></div>';
   }
   function renderDistrictMap(focus) {
     usePZ('w' + S.cur, DW, DH);
     $('#mapbannerHost').innerHTML = '';
     mapWorld.className = 'district';
-    mapWorld.innerHTML = districtScene(S.cur, false) + '<div class="nightveil"></div>';
+    mapWorld.innerHTML = districtScene(S.cur, false) + '<div class="dsky">' + skyLife() + '</div><div class="nightveil"></div>';
     mapWorld.querySelectorAll('.mpen').forEach(b => b.addEventListener('click', () => penTap(+b.dataset.pen, b)));
     mapWorld.querySelectorAll('.mslot').forEach(b => b.addEventListener('click', () => slotTap(+b.dataset.slot, b)));
     mapWorld.querySelectorAll('.mshop').forEach(b => b.addEventListener('click', () => shopTap(b.dataset.shop, b)));
@@ -1433,7 +1448,9 @@
     if (S.story.done.q11) pool.push('🚒');
     if (S.story.done.q20) pool.push('🚓');
     const nCars = done ? Math.min(6, 1 + Math.floor(done / 5)) : 0;
-    const cars = [...Array(nCars)].map((_, i) => `<text font-size="34" class="mcar" dy="12" text-anchor="middle">${pool[(i * 3 + done) % pool.length]}<animateMotion dur="${18 + i * 3}s" begin="-${i * 4.3}s" repeatCount="indefinite" path="${roads.ring}"/></text>`).join('');
+    // every car waits at the traffic light (top right) and the bus stop (bottom left) on its way round
+    const stops = 'keyPoints="0;0.25;0.25;0.75;0.75;1" keyTimes="0;0.22;0.3;0.68;0.76;1" calcMode="linear"';
+    const cars = [...Array(nCars)].map((_, i) => `<text font-size="34" class="mcar" dy="12" text-anchor="middle">${i === 1 ? '🚌' : pool[(i * 3 + done) % pool.length]}<animateMotion dur="${20 + i * 3}s" begin="-${i * 4.3}s" repeatCount="indefinite" ${stops} path="${roads.ring}"/></text>`).join('');
     const folk = ['🚶', '🚶‍♀️', '🏃‍♀️', '👫'].concat(Object.keys(PEOPLE).filter(personHelped).map(id => PEOPLE[id].job));
     const peds = [...Array(Math.min(8, Math.ceil(done / 4)))].map((_, i) => `<text font-size="22" dy="-16" text-anchor="middle">${folk[(i * 5) % folk.length]}<animateMotion dur="${50 + i * 7}s" begin="-${i * 9}s" repeatCount="indefinite" path="${roads.ring}"/></text>`).join('');
     const lamps = lit ? [[RING.x1, 700], [RING.x1, 950], [RING.x2, 700], [RING.x2, 950], [450, RING.y1], [550, RING.y2], [500, 420], [RING.x1, 1150], [RING.x2, 1150]]
@@ -1441,11 +1458,16 @@
     const train = S.wonders.train ? `<path d="M30,40 H970 V1370 H30 Z" fill="none" stroke="#8a5426" stroke-width="10" stroke-dasharray="4 10"/><path d="M30,40 H970 V1370 H30 Z" fill="none" stroke="#666" stroke-width="3"/>
       ${['🚂', '🚃', '🚃', '🚃'].map((t, i) => `<text font-size="38" text-anchor="middle" dy="12">${t}<animateMotion dur="40s" begin="-${i * 0.75}s" repeatCount="indefinite" path="M30,40 H970 V1370 H30 Z"/></text>`).join('')}` : '';
     const svg = `<svg class="terrain" viewBox="0 0 ${CW} ${CH}" width="${CW}" height="${CH}">
-      <defs><pattern id="grassdots" width="40" height="40" patternUnits="userSpaceOnUse"><circle cx="8" cy="10" r="2" fill="#6fbf4a"/><circle cx="28" cy="30" r="2.5" fill="#86d062"/></pattern></defs>
-      <rect width="${CW}" height="${CH}" fill="#8fd16a"/><rect width="${CW}" height="${CH}" fill="url(#grassdots)"/>
+      <defs><pattern id="grassdots" width="40" height="40" patternUnits="userSpaceOnUse"><circle cx="8" cy="10" r="2" fill="#6fbf4a"/><circle cx="28" cy="30" r="2.5" fill="#86d062"/></pattern>
+        <pattern id="flowers" width="130" height="110" patternUnits="userSpaceOnUse"><circle cx="20" cy="30" r="3" fill="#fff"/><circle cx="26" cy="34" r="3" fill="#ffd84d"/><circle cx="90" cy="80" r="3" fill="#ff8fb8"/><circle cx="96" cy="76" r="2.5" fill="#fff"/><circle cx="60" cy="10" r="2.5" fill="#c8a2ff"/></pattern></defs>
+      <rect width="${CW}" height="${CH}" fill="#8fd16a"/><rect width="${CW}" height="${CH}" fill="url(#grassdots)"/><rect width="${CW}" height="${CH}" fill="url(#flowers)" opacity=".8"/>
       <path d="M0,22 C200,60 360,0 520,28 S820,70 1000,20 L1000,0 L0,0 Z" fill="#7cc8e8"/>
+      <path d="M0,22 C200,60 360,0 520,28 S820,70 1000,20" fill="none" stroke="#5aa9d6" stroke-width="4"/>
+      <path d="M10,14 C200,46 360,-6 520,18 S820,58 990,12" fill="none" stroke="#fff" stroke-width="2" stroke-dasharray="10 26" class="shimmer" opacity=".8"/>
       <ellipse cx="500" cy="810" rx="150" ry="170" fill="#efe4c9" stroke="#d8c7a0" stroke-width="6"/>
+      <path d="${roads.ring} ${roads.links}" fill="none" stroke="#e3dccb" stroke-width="60" stroke-linejoin="round"/>
       <path d="${roads.ring} ${roads.links}" fill="none" stroke="#8d8d8d" stroke-width="40" stroke-linejoin="round"/>
+      <path d="M${RING.x1 - 20},${RING.y1 + 40} h40 M${RING.x1 - 20},${RING.y1 + 52} h40 M${RING.x1 - 20},${RING.y1 + 64} h40" stroke="#fff" stroke-width="6"/>
       <path d="${roads.ring} ${roads.links}" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="16 14"/>
       ${train}${lamps}${cars}${peds}</svg>`;
     const plots = Object.entries(PLOTS).map(([id, [x, y]]) => {
@@ -1474,7 +1496,10 @@
     const mount = '<span class="mount" style="left:880px;top:40px">⛰️</span><span class="mount" style="left:20px;top:40px">🏔️</span>';
     const fly = (S.story.done.q24 ? '<div class="flyover">🚁</div>' : '') + (S.story.done.q30 ? '<div class="flyover hero">🦸</div>' : '');
     const banner = pending.length ? `<div class="mapbanner">📍 ${placeIcon(pending[0])} ${esc(placeName(pending[0]))}? 👇 🪧</div>` : '';
-    mapWorld.innerHTML = svg + trees + mount
+    const life = '<span class="tlight" style="left:690px;top:640px">🚦</span><span class="bstop" style="left:296px;top:950px">🚏</span>'
+      + '<span class="fish" style="left:240px;top:14px">🐟</span><span class="fish f2" style="left:700px;top:20px">🐠</span>'
+      + skyLife();
+    mapWorld.innerHTML = svg + trees + mount + life
       + `<button class="hall" data-who="max" style="left:445px;top:575px"><span>🏛️</span><b>${face('max')}</b></button>`
       + `<span class="fountain" style="left:450px;top:770px">${SVGS.fountain()}</span>`
       + wslots + plots + fly + '<div class="nightveil"><span>✨</span><span>⭐</span><span>✨</span><span>🌙</span><span>⭐</span></div>';
@@ -1757,6 +1782,40 @@
     const sky = $('#navbar .skyicon');
     if (sky) sky.textContent = night ? '🌙' : dusk ? '🌇' : '☀️';
   }
+  // one weather per in-game day: mostly sunny, sometimes a rain shower then a rainbow, snow in winter months
+  function weatherNow() {
+    const day = Math.floor(Date.now() / 1000 / DAY_LEN), p = dayPhase();
+    const r = ((day * 9301 + 49297) % 233280) / 233280;
+    const m = new Date().getMonth(), snowy = [5, 6, 7, 11].includes(m);
+    if (r < 0.22) return p > 0.12 && p < 0.42 ? 'rain' : p >= 0.42 && p < 0.56 ? 'rainbow' : 'sun';
+    if (r < 0.34 && snowy) return 'snow';
+    return 'sun';
+  }
+  let wxShown = '', rainNode = null;
+  function rainSound(on) {
+    if (on && !rainNode && !S.mute) {
+      const a = ac(); if (!a) return;
+      if (!NOISE) noise({ dur: 0.01, vol: 0.0001 }); // builds the shared noise buffer
+      const n = a.createBufferSource(), f = a.createBiquadFilter(), g = a.createGain();
+      n.buffer = NOISE; n.loop = true; f.type = 'bandpass'; f.frequency.value = 1400; f.Q.value = 0.6; g.gain.value = 0.035;
+      n.connect(f).connect(g).connect(OUT); n.start();
+      rainNode = n;
+    } else if (!on && rainNode) { try { rainNode.stop(); } catch (e) { /* already stopped */ } rainNode = null; }
+  }
+  function weatherTick() {
+    const w = weatherNow(), visible = !document.hidden && openK < 0;
+    rainSound(w === 'rain' && visible);
+    if (w === wxShown) return;
+    wxShown = w;
+    ['rain', 'snow', 'rainbow'].forEach(c => mapView.classList.toggle(c, w === c));
+    const ic = $('#navbar .wxicon');
+    if (ic) ic.textContent = w === 'rain' ? '🌧️' : w === 'snow' ? '❄️' : w === 'rainbow' ? '🌈' : '';
+  }
+  (function weatherLayer() {
+    const wx = el('div', 'wx', '<div class="rainfall"></div><div class="snowfall">' + '<i>❄️</i>'.repeat(14) + '</div><div class="bow"></div>');
+    wx.id = 'wx';
+    mapView.appendChild(wx);
+  })();
   // every frame: called from the main loop
   function cityTick(dt) {
     if (document.hidden) return;
@@ -1764,6 +1823,7 @@
     if (cityT < 1) return;
     cityT = 0;
     dayNight();
+    weatherTick();
     if (view !== 'city' || openK >= 0) return;
     if (talking || !$('#modal').classList.contains('hidden') || S.play.lock) return;
     const now = Date.now();
@@ -2669,7 +2729,7 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
-  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, goWorld, goQuest: q => goQuest(QUESTS[q]), openLane, closeLane: () => closeLane(), placeHere, needPlacing, get view() { return view; }, sync, setView, showWonder, WONDERS, spawnRescue: () => spawnRescue(), spawnVisitor: () => spawnVisitor(), RIDES, FOOD, get talking() { return talking; }, authInit, accountSync, openGrownups,
+  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, weatherNow: () => weatherNow(), goWorld, goQuest: q => goQuest(QUESTS[q]), openLane, closeLane: () => closeLane(), placeHere, needPlacing, get view() { return view; }, sync, setView, showWonder, WONDERS, spawnRescue: () => spawnRescue(), spawnVisitor: () => spawnVisitor(), RIDES, FOOD, get talking() { return talking; }, authInit, accountSync, openGrownups,
     // test hook: render sounds into an OfflineAudioContext
     audio: { VOICES, fart, sfx, voice(n) { voiceGain = VOICE_GAIN[n] || 1; VOICES[n](); voiceGain = 1; }, useContext(ctx) { AC = ctx; OUT = ctx.destination; NOISE = null; } } }; // handy for debugging
 })();
