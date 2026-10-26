@@ -27,5 +27,50 @@ service cloud.firestore {
         && request.resource.data.updated is int;
       allow list, delete: if false;
     }
+      // ----- friends (see game.js "friends") -----
+    // Players are found only by an exact friend code; nothing can be listed or searched.
+    function fid(x) { return x is string && x.matches('^[A-Z]{5}[2-9A-Z]{6}$'); }
+    function room(r) { return r.matches('^[A-Z]{5}[2-9A-Z]{6}_[A-Z]{5}[2-9A-Z]{6}$'); }
+    match /players/{p} {
+      allow get: if fid(p);
+      allow create, update: if fid(p) && request.resource.data.keys().hasOnly(['n', 'av', 'snap', 't'])
+        && request.resource.data.n is string && request.resource.data.n.size() <= 30
+        && request.resource.data.av is string && request.resource.data.av.size() <= 16
+        && request.resource.data.snap is string && request.resource.data.snap.size() < 8000
+        && request.resource.data.t is int;
+      allow list, delete: if false;
+      // "p has added this friend" (friendship counts once both sides have added each other)
+      match /fr/{other} {
+        allow get, delete: if fid(p) && fid(other);
+        allow create, update: if fid(p) && fid(other) && request.resource.data.keys().hasOnly(['t']) && request.resource.data.t is int;
+        allow list: if false;
+      }
+      // one gift per friend per day; the receiver decides what it is worth
+      match /gifts/{g} {
+        allow list: if fid(p) && request.query.limit <= 50;
+        allow create: if fid(p) && fid(request.resource.data.f) && g == request.resource.data.f + '_' + g.split('_')[1]
+          && g.split('_')[1].matches('^[0-9]{8}$')
+          && request.resource.data.keys().hasOnly(['f', 'k', 't']) && request.resource.data.k is int
+          && request.resource.data.k >= 0 && request.resource.data.k < 4 && request.resource.data.t is int;
+        allow delete: if fid(p);
+        allow get, update: if false;
+      }
+    }
+    // chat between two friends: only the number of a ready-made phrase, never free text
+    match /rooms/{r}/m/{m} {
+      allow list: if room(r) && request.query.limit <= 30;
+      allow create: if room(r) && request.resource.data.keys().hasOnly(['f', 'p', 't'])
+        && fid(request.resource.data.f) && request.resource.data.f in r.split('_')
+        && request.resource.data.p is int && request.resource.data.p >= 0 && request.resource.data.p < 64
+        && request.resource.data.t is int;
+      allow get, update, delete: if false;
+    }
+    // team quest progress shared by two friends
+    match /teams/{r} {
+      allow get: if room(r);
+      allow create, update: if room(r) && request.resource.data.q is int && request.resource.data.q >= 0
+        && request.resource.data.q < 10000 && request.resource.data.keys().size() <= 12;
+      allow list, delete: if false;
+    }
   }
 }

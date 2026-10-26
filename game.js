@@ -3,8 +3,10 @@
   // ---------- config ----------
   // admin test sandbox (opened from admin.html): separate saves, no cloud, no accounts
   const SANDBOX = !!window.RF_SANDBOX;
+  let VISIT = null; // the friend whose town we're looking at (read-only), or null
   // names in the game follow the player: "Mia's Farm", "Planet Mia" (or "My Farm" before a name is set)
   function playerName() {
+    if (VISIT) return VISIT.n;
     try { const n = (curProfile() || {}).name || ''; return /^(…|Player|Tester)?$/.test(n) ? '' : n; } catch (e) { return ''; } // profiles load later
   }
   const own = what => { const n = playerName(); return n ? `${n}'s ${what}` : `My ${what}`; };
@@ -124,6 +126,7 @@
   const storyDefaults = () => ({ q: 0, done: {}, intro: false, finale: false });
   const cityDefaults = () => ({ cars: {}, ride: '', food: {}, visitors: {}, rescues: 0, hi: {} });
   const mapDefaults = () => ({ places: {}, slots: {}, wslots: {} });
+  const socialDefaults = () => ({ fid: '', friends: [], gifted: {}, team: {}, seen: {}, trophies: 0 });
   const playDefaults = () => ({ used: 0, day: '', dayUsed: 0, extra: 0, warned: false, lock: null });
   function freshWorld(w) {
     return {
@@ -133,7 +136,7 @@
     };
   }
   function fresh() {
-    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, parent: parentDefaults(), play: playDefaults(), story: storyDefaults(), city: cityDefaults(), map: mapDefaults(), mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
+    return { v: 2, rev: 0, pend: false, cur: 0, ach: {}, wonders: {}, parent: parentDefaults(), play: playDefaults(), story: storyDefaults(), city: cityDefaults(), map: mapDefaults(), social: socialDefaults(), mute: false, silly: true, last: Date.now(), seen: WD.map((_, i) => i === 0), worlds: WD.map((_, i) => freshWorld(i)) };
   }
   function mergeWorld(w, d) {
     const g = freshWorld(w);
@@ -219,6 +222,7 @@
     base.story = Object.assign(storyDefaults(), d.story || {});
     base.city = Object.assign(cityDefaults(), d.city || {});
     base.map = Object.assign(mapDefaults(), d.map || {});
+    base.social = Object.assign(socialDefaults(), d.social || {});
     base.rev = d.rev | 0;
     base.pend = !!d.pend;
     if (d.last) base.last = d.last;
@@ -888,10 +892,12 @@
   function renderNav() {
     const nav = $('#navbar'), D = WD[S.cur];
     nav.innerHTML = view === 'city'
-      ? `<span class="navtitle"><span class="skyicon">☀️</span><span class="wxicon"></span> ${esc(townName())}</span><span class="navhint">${needPlacing().length ? '📍' : '👆'}</span>`
+      ? `<span class="navtitle"><span class="skyicon">☀️</span><span class="wxicon"></span> ${esc(townName())}</span><span class="navhint">${needPlacing().length ? '📍' : '👆'}</span><button class="navfriends" id="navFriends" aria-label="Friends">👫<i class="fbadge" id="fBadge"></i></button>`
       : `<button class="navback" id="navBack">⬅️ 🏙️</button><span class="navtitle"><span class="wxicon"></span>${D.icon} ${esc(G.b[5] ? D.done : D.title)}</span>`;
     const b = $('#navBack');
     if (b) b.onclick = () => { ac(); sfx.pop(); setView('city'); };
+    const fb = $('#navFriends');
+    if (fb) { fb.onclick = () => { ac(); sfx.pop(); openFriends(); }; showFriendBadge(); }
     refreshMapBtn();
     layoutMap();
     wxShown = '';
@@ -1658,7 +1664,7 @@
       + '<div class="birds"><i>🐦</i><i>🐦</i><i>🐦</i></div>';
   }
   function renderDistrictMap(focus) {
-    cityIsoOn = false;
+    cityIsoOn = false; VISIT = null;
     const iso = isoReady(S.cur);  // areas that have their isometric art use it
     usePZ(iso ? 'iso' + S.cur : 'w' + S.cur, iso ? IW : DW, iso ? IH : DH);
     $('#mapbannerHost').innerHTML = '';
@@ -1868,6 +1874,7 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && cityIsoOn && view === 'city') startMovers(); });
   function renderCityIso(focus) {
     cityIsoOn = true;
+    if (VISIT) return renderVisit();
     usePZ('cityiso', CIW, CIH);
     mapWorld.className = 'citymap isomap'; mapView.style.background = '';
     const pending = needPlacing();
@@ -1897,6 +1904,7 @@
     if (!talking) cityHellos();
   }
   function renderCityMap(focus) {
+    if (VISIT && !cityIsoReady()) VISIT = null;
     if (cityIsoReady()) return renderCityIso(focus);
     cityIsoOn = false;
     usePZ('city', CW, CH);
@@ -2149,7 +2157,7 @@
   function openDistricts() { return Object.keys(S.map.places).filter(k => k[0] === 'w').map(k => S.map.places[k]); }
   function spawnRescue() {
     const kinds = RESCUES.filter(r => S.story.done[r.need]), spots = openDistricts();
-    if (view !== 'city' || !kinds.length || !spots.length) return;
+    if (view !== 'city' || VISIT || !kinds.length || !spots.length) return;
     const r = pick(kinds), [px, py] = PLOTS[pick(spots)];
     cityEv = { r, x: px + (Math.random() - 0.5) * 140, y: py + (Math.random() - 0.5) * 90, until: Date.now() + 25000 };
     attachCityThings();
@@ -2157,7 +2165,7 @@
   }
   function spawnVisitor() {
     const kinds = VISITORS.filter(v => S.story.done[v.need]);
-    if (view !== 'city' || !kinds.length) return;
+    if (view !== 'city' || VISIT || !kinds.length) return;
     const [x, y] = pick(ROAD_SPOTS);
     visitor = { v: pick(kinds), x, y, until: Date.now() + 15000 };
     attachCityThings();
@@ -2165,7 +2173,7 @@
   }
   // keep the rescue / visitor buttons in sync with state, without replacing ones already on screen
   function attachCityThings() {
-    if (view !== 'city' || openK >= 0) return;
+    if (view !== 'city' || openK >= 0 || VISIT) return;
     const cev = $('#mapworld .cev');
     if (cev && (!cityEv || cev._ev !== cityEv) && !busyRescue) cev.remove();
     if (cityEv && !$('#mapworld .cev')) {
@@ -3128,6 +3136,306 @@
     saveProfiles(); updateProfBtn();
   }
 
+
+  // ---------- friends: codes, visiting, gifts, team quests and safe chat ----------
+  // Friends are only added by a grown-up (PIN) with each other's friend code, and both sides must add each other.
+  // Chat is ready-made phrases and emoji only, so nothing unkind can be typed. Everything runs on the free Firebase plan.
+  const FS = 'https://firestore.googleapis.com/v1/projects/rudras-farm-game/databases/(default)/documents/';
+  const fsVal = v => (typeof v === 'number' ? { integerValue: String(Math.floor(v)) } : typeof v === 'boolean' ? { booleanValue: v } : { stringValue: String(v) });
+  const fsRead = f => Object.fromEntries(Object.entries(f || {}).map(([k, v]) => [k, v.integerValue != null ? Number(v.integerValue) : v.booleanValue != null ? v.booleanValue : v.stringValue]));
+  async function fsGet(path) {
+    const r = await fetch(`${FS}${path}?key=${FB_KEY}`, { cache: 'no-store' });
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error('get ' + r.status);
+    return fsRead((await r.json()).fields);
+  }
+  async function fsSet(path, obj, merge, drop = []) {  // merge: only touch these fields; drop: fields to delete
+    const mask = merge ? Object.keys(obj).concat(drop).map(k => 'updateMask.fieldPaths=' + encodeURIComponent('`' + k + '`')).join('&') + '&' : '';
+    const r = await fetch(`${FS}${path}?${mask}key=${FB_KEY}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, fsVal(v)])) }) });
+    if (!r.ok) throw new Error('set ' + r.status);
+  }
+  async function fsAdd(path, obj) {
+    const r = await fetch(`${FS}${path}?key=${FB_KEY}`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields: Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, fsVal(v)])) }) });
+    if (!r.ok) throw new Error('add ' + r.status);
+  }
+  async function fsList(path, n, order) {
+    const r = await fetch(`${FS}${path}?pageSize=${n}${order ? '&orderBy=' + encodeURIComponent(order) : ''}&key=${FB_KEY}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error('list ' + r.status);
+    return ((await r.json()).documents || []).map(d => Object.assign(fsRead(d.fields), { _id: d.name.split('/').pop() }));
+  }
+  const fsDel = path => fetch(`${FS}${path}?key=${FB_KEY}`, { method: 'DELETE' });
+
+  const PHRASES = ['Hi! 👋', 'Great job! 👍', 'Help me! 🆘', 'Let’s do the team quest! 🤝', 'Look at my town! 🏙️', 'I built a wonder! 🏛️', 'Thank you! 🙏', 'Wow! 🤩',
+    'Haha! 😂', 'I sent you a gift! 🎁', 'Nearly there! 💪', 'We did it! 🎉', 'Yes! ✅', 'No ❌', 'Wait for me! ⏳', 'Come and play! 🎮', 'Let’s play tomorrow! 📅', 'Bye! 👋',
+    '❤️', '😀', '😮', '😢', '👏', '🔥', '⭐', '🐔', '🐶', '🦁', '🚀', '🦄'];
+  const GIFTS = ['🎁', '🍪', '🌟', '🧸'];
+  // team quests go in order; both friends sell into one shared target
+  const TEAMQ = [
+    { e: '🥞', n: 'Pancake Party', w: 0, k: 0, need: 60 }, { e: '🥤', n: 'Milkshake Day', w: 0, k: 1, need: 80 }, { e: '🧣', n: 'Cosy Scarf Week', w: 0, k: 2, need: 100 },
+    { e: '🍲', n: 'Mushroom Soup Fest', w: 0, k: 3, need: 120 }, { e: '🍰', n: 'Honey Bake-off', w: 0, k: 4, need: 150 }, { e: '🎠', n: 'Pony Parade', w: 0, k: 5, need: 150 },
+    { e: '🏡', n: 'Puppy Adoption Day', w: 1, k: 0, need: 150 }, { e: '☕', n: 'Kitten Café', w: 1, k: 1, need: 200 }, { e: '🎈', n: 'Balloon Festival', w: 2, k: 0, need: 200 },
+    { e: '🎋', n: 'Panda Picnic', w: 2, k: 1, need: 250 },
+  ];
+  const teamQ = q => { const t = TEAMQ[q % TEAMQ.length], round = Math.floor(q / TEAMQ.length); return Object.assign({}, t, { need: Math.round(t.need * Math.pow(2, round)), round }); };
+  const SOC = () => S.social;
+  const FID_RE = /^[A-Z]{5}[2-9A-Z]{6}$/;
+  const prettyFid = f => `${f.slice(0, 5)}-${f.slice(5)}`;
+  const roomId = f => [SOC().fid, f].sort().join('_');
+  const today8 = () => { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; };
+  const socialOK = () => !SANDBOX && 'fetch' in window;
+  function myFid() {
+    if (!SOC().fid) { const c = newCode(); SOC().fid = c.slice(0, 5) + c.slice(5, 11); S.pend = true; save(); }
+    return SOC().fid;
+  }
+  const mutual = () => SOC().friends.filter(f => f.ok);
+  // what a friend sees when visiting: just the town, no coins or codes
+  function townSnap() {
+    return JSON.stringify({ v: 1, places: S.map.places, wslots: S.map.wslots, wonders: Object.keys(S.wonders), cars: Object.keys(S.city.cars), food: Object.keys(S.city.food),
+      done: Object.keys(S.story.done), w: S.worlds.map(g => [g.u ? 1 : 0, g.b.map(x => (x ? 1 : 0)).join(''), g.lanes.map(l => (l.u ? 1 : 0)).join('')]), st: starCount() });
+  }
+  let cardSent = '', cardT = 0;
+  async function pushCard(force) {
+    if (!socialOK() || !SOC().fid) return;
+    const p = curProfile(), snap = townSnap(), key = p.name + p.av + snap;
+    if (!force && key === cardSent && Date.now() - cardT < 90000) return;
+    await fsSet('players/' + SOC().fid, { n: String(p.name || 'Player').slice(0, 30), av: p.av || '🧒', snap, t: Date.now() });
+    cardSent = key; cardT = Date.now();
+  }
+  const cards = {}; // friend fid -> their latest card
+  const unread = {}, giftsIn = [];
+  let teamDocs = {};
+  async function socialTick() {
+    if (!socialOK() || !SOC().fid || document.hidden) return;
+    try {
+      await pushCard();
+      const me = SOC().fid;
+      for (const f of SOC().friends) {
+        if (!f.ok) { if (await fsGet(`players/${f.fid}/fr/${me}`)) { f.ok = true; S.pend = true; save(); toast(`🎉 ${f.n} is now your friend!`); } }
+        const c = await fsGet('players/' + f.fid);
+        if (c) { cards[f.fid] = c; if (c.n && (c.n !== f.n || c.av !== f.av)) { f.n = c.n; f.av = c.av; } }
+        if (!f.ok) continue;
+        const rid = roomId(f.fid), last = (await fsList(`rooms/${rid}/m`, 1, 't desc'))[0];
+        unread[f.fid] = !!(last && last.f !== me && last.t > (SOC().seen[rid] || 0));
+        await teamStep(f);
+      }
+      giftsIn.length = 0;
+      (await fsList(`players/${me}/gifts`, 20)).forEach(g => { if (SOC().friends.some(f => f.ok && f.fid === g.f)) giftsIn.push(g); });
+      showFriendBadge();
+    } catch (e) { /* offline: try again next time */ }
+  }
+  setInterval(socialTick, 25000);
+  function showFriendBadge() {
+    const b = $('#fBadge');
+    if (!b) return;
+    const n = Object.values(unread).filter(Boolean).length + giftsIn.length + mutual().filter(f => teamReady(f)).length;
+    b.textContent = n ? n : '';
+  }
+  // ----- team quests -----
+  const soldOf = (w, k) => (S.worlds[w].u && S.worlds[w].lanes[k].u ? S.worlds[w].lanes[k].sold : null);
+  function teamState(f) {
+    const rid = roomId(f.fid), d = teamDocs[rid] || { q: 0 }, q = d.q | 0, T = teamQ(q), me = SOC().fid;
+    const loc = SOC().team[rid] || (SOC().team[rid] = { q, base: soldOf(T.w, T.k) });
+    if (loc.q !== q) { loc.q = q; loc.base = soldOf(T.w, T.k); }
+    if (loc.base == null && soldOf(T.w, T.k) != null) loc.base = soldOf(T.w, T.k); // pen opened during the quest: count from now
+    const mine = loc.base == null ? 0 : Math.max(0, soldOf(T.w, T.k) - loc.base);
+    const theirs = Number(d[`c${q}_${f.fid}`]) || 0;
+    return { rid, q, T, mine, theirs, total: Math.min(T.need, mine + theirs), can: soldOf(T.w, T.k) != null, sent: Number(d[`c${q}_${me}`]) || 0,
+      claimed: loc.claimed === q, both: !!(d[`k${q}_${me}`] && d[`k${q}_${f.fid}`]) };
+  }
+  const teamReady = f => { const t = teamState(f); return t.total >= t.T.need && !t.claimed; };
+  async function teamStep(f) {
+    const rid = roomId(f.fid);
+    teamDocs[rid] = (await fsGet('teams/' + rid)) || { q: 0 };
+    const t = teamState(f);
+    if (t.both) return nextTeamQuest(t, f);
+    if (t.mine !== t.sent && !t.claimed) await fsSet('teams/' + rid, { q: t.q, [`c${t.q}_${SOC().fid}`]: t.mine }, true);
+  }
+  // both friends have collected: move on to the next quest and tidy the old numbers away
+  async function nextTeamQuest(t, f) {
+    const me = SOC().fid, old = [`c${t.q}_${me}`, `c${t.q}_${f.fid}`, `k${t.q}_${me}`, `k${t.q}_${f.fid}`];
+    await fsSet('teams/' + t.rid, { q: t.q + 1 }, true, old);
+    teamDocs[t.rid] = { q: t.q + 1 };
+  }
+  async function claimTeam(f, btn) {
+    const t = teamState(f);
+    if (t.total < t.T.need || t.claimed) return shake(btn);
+    SOC().team[t.rid].claimed = t.q; SOC().trophies++;
+    const amt = townReward(180 + 30 * t.q);
+    payBank(amt); save();
+    confetti(160); sfx.partyHorn(); celebrate('🏆', 0, `${t.T.n}! +${fmt(amt)} 💰`);
+    try {
+      await fsSet('teams/' + t.rid, { q: t.q, [`c${t.q}_${SOC().fid}`]: t.mine, [`k${t.q}_${SOC().fid}`]: 1 }, true);
+      await teamStep(f); // if the friend already collected, start the next quest
+    } catch (e) { /* tried again on the next check */ }
+    openFriend(f.fid);
+  }
+  function teamHTML(f) {
+    const t = teamState(f), L = WD[t.T.w].lanes[t.T.k], N = nm(t.T.w, t.T.k);
+    const pc = x => Math.min(100, x / t.T.need * 100);
+    const done = t.total >= t.T.need;
+    return `<div class="teamq${done ? ' done' : ''}"><div class="tqh"><span>${t.T.e}</span><b>Team quest: ${esc(t.T.n)}${t.T.round ? ' ⭐'.repeat(Math.min(3, t.T.round)) : ''}</b></div>
+      <div class="tqg">Sell <b>${t.T.need}</b> ${L.p} ${esc(N.p)} together</div>
+      <div class="tqbar"><i class="me" style="width:${pc(t.mine)}%"></i><i class="fr" style="width:${pc(Math.min(t.theirs, t.T.need - Math.min(t.mine, t.T.need)))}%"></i></div>
+      <div class="tqnums"><span>🟦 You: ${t.mine}</span><span>${t.total} / ${t.T.need}</span><span>🟧 ${esc(f.n)}: ${t.theirs}</span></div>
+      ${t.can ? '' : `<div class="tqwhy">Open the ${L.a} ${esc(N.a)} pen in ${esc(WD[t.T.w].title)} to help!</div>`}
+      ${done ? (t.claimed ? `<div class="tqwhy">✅ Prize collected! The next quest starts when ${esc(f.n)} collects theirs.</div>` : '<button class="bigbtn can" id="tqClaim">🏆 Get the team prize!</button>') : ''}</div>`;
+  }
+  // ----- screens -----
+  function parentGate(then) { if (S.parent.pin) { openModal(`<h2>👨‍👩‍👧 Grown-ups only</h2><div id="pinBox"></div>`); pinPad($('#pinBox'), 'PIN', checkPin(then)); } else setPinFlow(then); }
+  function ago(t) { const m = (Date.now() - t) / 60000; return m < 3 ? '🟢 Playing now' : m < 60 ? `${Math.round(m)} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; }
+  function openFriends() {
+    if (SANDBOX) return toast('Friends are switched off in the test sandbox');
+    const me = myFid();
+    pushCard(true).catch(() => {});
+    const list = SOC().friends.map(f => {
+      const c = cards[f.fid], badge = (unread[f.fid] ? '💬' : '') + (f.ok && teamReady(f) ? '🏆' : '');
+      return `<button class="fcard" data-f="${f.fid}"><span class="fav">${esc(f.av || '🧒')}</span><span class="fn">${esc(f.n)}<small>${f.ok ? (c ? ago(c.t) : '') : '⏳ Waiting for them to add you too'}</small></span><i>${badge}</i></button>`;
+    }).join('') || '<p class="phint">No friends yet. Ask a grown-up to add one!</p>';
+    openModal(`<div class="friends"><h2>👫 Friends</h2>
+      <div class="fcode"><span>Your friend code</span><b>${prettyFid(me)}</b><button class="smallbtn" id="fcCopy">📋 Copy</button></div>
+      ${giftsIn.length ? `<button class="bigbtn can" id="fGifts">🎁 You have ${giftsIn.length} gift${giftsIn.length > 1 ? 's' : ''}! Open</button>` : ''}
+      <div class="flist">${list}</div>
+      <button class="bigbtn" id="fAdd">➕ Add a friend</button>
+      <p class="phint">A grown-up adds friends with each other's friend code. Only friends can visit your town or send you messages. 🏆 Team prizes: ${SOC().trophies}</p></div>`);
+    $('#fcCopy').onclick = () => { try { navigator.clipboard.writeText(prettyFid(me)); toast('Copied! Send it to your friend’s grown-up 📋'); } catch (e) { toast(prettyFid(me)); } };
+    $('#fAdd').onclick = () => parentGate(addFriendForm);
+    document.querySelectorAll('#sheet .fcard').forEach(b => b.addEventListener('click', () => openFriend(b.dataset.f)));
+    const g = $('#fGifts');
+    if (g) g.onclick = openGifts;
+  }
+  function addFriendForm() {
+    openModal(`<h2>➕ Add a friend</h2><p class="phint">Type your child's friend's code (their grown-up finds it under 👫 Friends). They need to add your code too.</p>
+      <p class="phint">Your code: <b>${prettyFid(myFid())}</b></p>
+      <input id="fAddCode" class="pname" placeholder="PANDA-7K3M2Q" autocapitalize="characters" autocomplete="off">
+      <div class="setrow"><button class="bigbtn can" id="fAddGo">Find</button></div><div class="amsg" id="fAddMsg"></div>`);
+    $('#fAddGo').onclick = async () => {
+      const code = cleanCode($('#fAddCode').value), msg = $('#fAddMsg');
+      if (!FID_RE.test(code)) { msg.textContent = 'That doesn’t look like a friend code (like PANDA-7K3M2Q).'; return; }
+      if (code === myFid()) { msg.textContent = 'That’s your own code! 😄'; return; }
+      if (SOC().friends.some(f => f.fid === code)) { msg.textContent = 'Already on your friends list.'; return; }
+      msg.textContent = '🔄';
+      try {
+        const c = await fsGet('players/' + code);
+        if (!c) { msg.textContent = 'No player with that code yet. Ask them to open 👫 Friends once.'; return; }
+        await fsSet(`players/${myFid()}/fr/${code}`, { t: Date.now() });
+        const ok = !!(await fsGet(`players/${code}/fr/${myFid()}`));
+        SOC().friends.push({ fid: code, n: c.n, av: c.av, ok, added: Date.now() }); cards[code] = c;
+        S.pend = true; save();
+        toast(ok ? `🎉 ${c.n} is now your friend!` : `Added ${c.n}! Now they add your code too.`);
+        openFriends();
+      } catch (e) { msg.textContent = 'Couldn’t reach the internet. Try again.'; }
+    };
+  }
+  let chatT = 0;
+  async function openFriend(fid) {
+    const f = SOC().friends.find(x => x.fid === fid);
+    if (!f) return openFriends();
+    clearInterval(chatT);
+    const giftToday = SOC().gifted[fid] === today8();
+    openModal(`<div class="friend"><div class="fhead"><span class="fav">${esc(f.av || '🧒')}</span><h2>${esc(f.n)}</h2></div>
+      ${f.ok ? `<div class="setrow"><button class="smallbtn" id="fVisit">🏙️ Visit town</button><button class="smallbtn" id="fGift"${giftToday ? ' disabled' : ''}>${giftToday ? '✅ Gift sent today' : '🎁 Send a gift'}</button></div>
+        <div id="teamBox">${teamHTML(f)}</div>
+        <div class="chat" id="chatBox"><div class="phint">💬 …</div></div>
+        <div class="phrases">${PHRASES.map((t, i) => `<button class="phr" data-p="${i}">${t}</button>`).join('')}</div>`
+        : `<p class="phint">⏳ Waiting for ${esc(f.n)} to add your code: <b>${prettyFid(myFid())}</b></p>`}
+      <div class="setrow"><button class="linkbtn" id="fBack">⬅️ Friends</button><button class="linkbtn" id="fRemove">Remove friend</button></div></div>`);
+    $('#fBack').onclick = () => { clearInterval(chatT); openFriends(); };
+    $('#fRemove').onclick = () => parentGate(async () => {
+      SOC().friends = SOC().friends.filter(x => x.fid !== fid); S.pend = true; save();
+      fsDel(`players/${myFid()}/fr/${fid}`).catch(() => {});
+      toast('Friend removed'); openFriends();
+    });
+    if (!f.ok) return;
+    $('#fVisit').onclick = () => visitFriend(f);
+    $('#fGift').onclick = e => sendGift(f, e.currentTarget);
+    const claim = $('#tqClaim');
+    if (claim) claim.onclick = e => claimTeam(f, e.currentTarget);
+    document.querySelectorAll('#sheet .phr').forEach(b => b.addEventListener('click', () => sendPhrase(f, +b.dataset.p, b)));
+    const rid = roomId(fid);
+    const loadChat = async () => {
+      if ($('#modal').classList.contains('hidden') || !$('#chatBox')) { clearInterval(chatT); return; }
+      try {
+        const msgs = (await fsList(`rooms/${rid}/m`, 20, 't desc')).reverse();
+        const box = $('#chatBox');
+        box.innerHTML = msgs.map(m => `<div class="msg ${m.f === SOC().fid ? 'me' : 'them'}">${PHRASES[m.p] || ''}</div>`).join('') || '<div class="phint">Say hi! Tap a message below 👇</div>';
+        box.scrollTop = box.scrollHeight;
+        if (msgs.length) { SOC().seen[rid] = msgs[msgs.length - 1].t; unread[fid] = false; showFriendBadge(); }
+        teamDocs[rid] = (await fsGet('teams/' + rid)) || teamDocs[rid];
+        const tb = $('#teamBox');
+        if (tb && !$('#tqClaim')) { tb.innerHTML = teamHTML(f); const c2 = $('#tqClaim'); if (c2) c2.onclick = e => claimTeam(f, e.currentTarget); }
+      } catch (e) { /* offline */ }
+    };
+    loadChat(); chatT = setInterval(loadChat, 6000);
+    teamStep(f).catch(() => {});
+  }
+  let lastSend = 0;
+  async function sendPhrase(f, p, btn) {
+    if (Date.now() - lastSend < 1500) return; // no spamming
+    lastSend = Date.now();
+    btn.classList.add('sent'); setTimeout(() => btn.classList.remove('sent'), 400); sfx.pop();
+    try {
+      await fsAdd(`rooms/${roomId(f.fid)}/m`, { f: myFid(), p, t: Date.now() });
+      const box = $('#chatBox');
+      if (box) { box.insertAdjacentHTML('beforeend', `<div class="msg me">${PHRASES[p]}</div>`); box.scrollTop = box.scrollHeight; }
+    } catch (e) { toast('Couldn’t send. Are you online?'); }
+  }
+  async function sendGift(f, btn) {
+    if (SOC().gifted[f.fid] === today8()) return shake(btn);
+    try {
+      await fsSet(`players/${f.fid}/gifts/${myFid()}_${today8()}`, { f: myFid(), k: Math.floor(Math.random() * GIFTS.length), t: Date.now() });
+      SOC().gifted[f.fid] = today8(); S.pend = true; save();
+      sfx.yippee(); confetti(50); toast(`🎁 Gift sent to ${f.n}!`);
+      btn.disabled = true; btn.textContent = '✅ Gift sent today';
+    } catch (e) { toast('Couldn’t send. Are you online?'); }
+  }
+  async function openGifts() {
+    const me = myFid(), got = giftsIn.splice(0);
+    let total = 0;
+    got.forEach(g => { total += townReward(90); fsDel(`players/${me}/gifts/${g._id}`).catch(() => {}); });
+    if (!got.length) return openFriends();
+    payBank(total); save(); showFriendBadge();
+    const from = got.map(g => { const f = SOC().friends.find(x => x.fid === g.f); return `${GIFTS[g.k] || '🎁'} ${esc(f ? f.n : 'A friend')}`; }).join('<br>');
+    openModal(`<div class="wonderbox"><div class="wbig built">🎁</div><h2>Presents!</h2><p class="phint">${from}</p><div class="wfx">+${fmt(total)} 💰</div>
+      <button class="bigbtn can" id="gOk">Thank you! 🙏</button></div>`);
+    confetti(120); sfx.coin();
+    $('#gOk').onclick = () => { closeModal(); openFriends(); };
+  }
+  // ----- visiting a friend's town (looks real, nothing can be changed) -----
+  function visitFriend(f) {
+    const c = cards[f.fid];
+    if (!c || !cityIsoReady()) return toast('Their town is still loading… try again in a moment');
+    let snap; try { snap = JSON.parse(c.snap); } catch (e) { return toast('Couldn’t open their town'); }
+    const F = fresh();
+    F.map.places = snap.places || {}; F.map.wslots = snap.wslots || {};
+    (snap.wonders || []).forEach(id => { F.wonders[id] = 1; });
+    (snap.cars || []).forEach(id => { F.city.cars[id] = 1; });
+    (snap.food || []).forEach(id => { F.city.food[id] = Date.now(); });
+    (snap.done || []).forEach(id => { F.story.done[id] = 1; });
+    F.story.q = 999; F.story.intro = true;
+    (snap.w || []).forEach(([u, b, l], w) => { if (!F.worlds[w]) return; F.worlds[w].u = !!u; F.worlds[w].b = String(b).split('').map(x => x === '1'); F.worlds[w].lanes.forEach((L, k) => { L.u = String(l)[k] === '1'; L.n = 3; }); });
+    VISIT = { F, n: f.n, f };
+    closeModal(); clearInterval(chatT);
+    if (openK >= 0) closeLane(true);
+    view = 'city'; renderNav(); renderCurrent();
+  }
+  function renderVisit() {
+    usePZ('visit', CIW, CIH);
+    mapWorld.className = 'citymap isomap visiting'; mapView.style.background = '';
+    const real = S;
+    let html;
+    try { S = VISIT.F; html = cityIso([]); } finally { S = real; }
+    mapWorld.innerHTML = html + `<div class="dsky" style="--skyW:${CIW}px">${skyLife()}</div><div class="nightveil"></div>`;
+    $('#mapbannerHost').innerHTML = `<div class="mapbanner visitbar">👋 ${esc(VISIT.n)}’s town <button id="vWave">👋 Wave</button><button id="vHome">🏠 Home</button></div>`;
+    const f = VISIT.f;
+    $('#vWave').onclick = e => sendPhrase(f, 0, e.currentTarget).then(() => toast(`👋 You waved at ${f.n}!`));
+    $('#vHome').onclick = () => { VISIT = null; ac(); sfx.pop(); renderNav(); renderCurrent(); };
+    dayNight(); startMovers();
+  }
+  // keep the friend card fresh and check on friends when the game opens
+  setTimeout(() => { if (SOC().fid) socialTick(); }, 4000);
+
   // ---------- main loop ----------
   let lastT = performance.now(), uiT = 0, saveT = 0, bgT = 0;
   function tick(now) {
@@ -3214,7 +3522,7 @@
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }
-  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, weatherNow: () => weatherNow(), goWorld, goQuest: q => goQuest(QUESTS[q]), openLane, closeLane: () => closeLane(), placeHere, needPlacing, get view() { return view; }, sync, setView, showWonder, WONDERS, spawnRescue: () => spawnRescue(), spawnVisitor: () => spawnVisitor(), RIDES, FOOD, get talking() { return talking; }, authInit, accountSync, openGrownups,
+  window.__farm = { get S() { return S; }, get PR() { return PR; }, get user() { return user; }, RT, mult, fmt, weatherNow: () => weatherNow(), goWorld, goQuest: q => goQuest(QUESTS[q]), openLane, closeLane: () => closeLane(), placeHere, needPlacing, get view() { return view; }, sync, setView, showWonder, WONDERS, spawnRescue: () => spawnRescue(), spawnVisitor: () => spawnVisitor(), RIDES, FOOD, get talking() { return talking; }, socialTick: () => socialTick(), openFriends: () => openFriends(), get VISIT() { return VISIT; }, authInit, accountSync, openGrownups,
     // test hook: render sounds into an OfflineAudioContext
     audio: { VOICES, fart, sfx, voice(n) { voiceGain = VOICE_GAIN[n] || 1; VOICES[n](); voiceGain = 1; }, useContext(ctx) { AC = ctx; OUT = ctx.destination; NOISE = null; } } }; // handy for debugging
 })();
