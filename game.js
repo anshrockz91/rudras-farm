@@ -1,7 +1,9 @@
 'use strict';
 (() => {
   // ---------- config ----------
-  const SAVE_KEY = 'rudrasFarm.v1'; // same key as v1 so existing farm progress carries over
+  // admin test sandbox (opened from admin.html): separate saves, no cloud, no accounts
+  const SANDBOX = !!window.RF_SANDBOX;
+  const SAVE_KEY = SANDBOX ? 'rudrasFarm.sandbox.v1' : 'rudrasFarm.v1'; // same key as v1 so existing farm progress carries over
   const PEN_X = 0.34, COUNTER_X = 0.63, TRUCK_STOP = 0.80, TRUCK_OUT = 1.25;
   const PLAYER_SPEED = 0.75, PLAYER_CAP = 15, MAXLVL = 10, MAX_ANIMALS = 5;
 
@@ -138,8 +140,8 @@
     return g;
   }
   // ---------- profiles (one save per player, each synced to the cloud by its secret code) ----------
-  const PROFILES_KEY = 'rudrasFarm.profiles';
-  const saveKey = code => 'rudrasFarm.save.' + code;
+  const PROFILES_KEY = SANDBOX ? 'rudrasFarm.sandbox.profiles' : 'rudrasFarm.profiles';
+  const saveKey = code => (SANDBOX ? 'rudrasFarm.sandbox.save.' : 'rudrasFarm.save.') + code;
   const CODE_WORDS = ['TIGER', 'PANDA', 'HIPPO', 'KOALA', 'ZEBRA', 'OTTER', 'LLAMA', 'EAGLE', 'SHARK', 'WHALE', 'MANGO', 'LEMON',
     'ROBOT', 'CANDY', 'PIZZA', 'TRUCK', 'HONEY', 'BUNNY', 'PUPPY', 'KITTY', 'STARS', 'CLOUD', 'RIVER', 'MAPLE'];
   const CODE_CHARS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
@@ -158,14 +160,14 @@
 
   let PR = readJSON(PROFILES_KEY);
   const qs = new URLSearchParams(location.search);
-  const imports = (qs.get('import') || '').split(',').map(cleanCode).filter(validCode);
-  const linkCode = cleanCode(qs.get('p') || qs.get('cur') || imports[0]);
+  const imports = SANDBOX ? [] : (qs.get('import') || '').split(',').map(cleanCode).filter(validCode);
+  const linkCode = SANDBOX ? '' : cleanCode(qs.get('p') || qs.get('cur') || imports[0]);
   const old = readJSON(SAVE_KEY); // progress from before profiles existed (kept as a backup too)
   if (!PR || !Array.isArray(PR.list) || !PR.list.length) {
     PR = { cur: null, list: [] };
     if (old || !validCode(linkCode)) {
       const code = newCode();
-      PR = { cur: code, list: [{ code, name: old ? 'Rudra' : 'Player', av: '🧒', auto: !old }] };
+      PR = { cur: code, list: [{ code, name: SANDBOX ? 'Tester' : old ? 'Rudra' : 'Player', av: SANDBOX ? '🧪' : '🧒', auto: !old && !SANDBOX }] };
       if (old) writeJSON(saveKey(code), old);
     }
   }
@@ -2215,7 +2217,8 @@
 
   // ----- day & night (a whole day takes about 6 minutes) -----
   const DAY_LEN = 360;
-  function dayPhase() { return (Date.now() / 1000 % DAY_LEN) / DAY_LEN; }
+  const FORCE = { phase: null, weather: null, speed: 1 }; // admin sandbox overrides
+  function dayPhase() { return FORCE.phase != null ? FORCE.phase : (Date.now() / 1000 % DAY_LEN) / DAY_LEN; }
   function dayNight() {
     const p = dayPhase();
     const night = p > 0.68 && p < 0.93, dusk = (p > 0.6 && p <= 0.68) || p >= 0.93;
@@ -2226,6 +2229,7 @@
   }
   // one weather per in-game day: mostly sunny, sometimes a rain shower then a rainbow, snow in winter months
   function weatherNow() {
+    if (FORCE.weather) return FORCE.weather;
     const day = Math.floor(Date.now() / 1000 / DAY_LEN), p = dayPhase();
     const r = ((day * 9301 + 49297) % 233280) / 233280;
     const m = new Date().getMonth(), snowy = [5, 6, 7, 11].includes(m);
@@ -2527,7 +2531,9 @@
   // ---------- cloud save (Firestore REST; the profile code is the document id) ----------
   const FB_KEY = 'AIzaSyCOxqx3i4FyJ5mm8TymPe6kJNoYv2ItPxw'; // public web key; access is controlled by firestore.rules
   const FB_URL = code => `https://firestore.googleapis.com/v1/projects/rudras-farm-game/databases/(default)/documents/saves/${code}?key=${FB_KEY}`;
-  async function cloudGet(code) {
+  // the sandbox never reads or writes cloud saves (except an explicit read-only copy from the admin panel)
+  const cloudGet = code => (SANDBOX ? Promise.resolve(null) : cloudFetch(code));
+  async function cloudFetch(code) {
     const r = await fetch(FB_URL(code), { cache: 'no-store' });
     if (r.status === 404) return null;
     if (!r.ok) throw new Error('cloud get ' + r.status);
@@ -2536,6 +2542,7 @@
     return { rev: Number(f.rev && f.rev.integerValue) || 0, data: str('data'), name: str('name'), av: str('av') };
   }
   function cloudPut(code, rev, state, prof, keepalive) {
+    if (SANDBOX) return Promise.resolve();
     const body = JSON.stringify({ fields: {
       rev: { integerValue: String(rev) },
       data: { stringValue: JSON.stringify(Object.assign({}, state, { rev, pend: false })) },
@@ -2968,6 +2975,7 @@
   };
   let auth = null, user = null, authReady = null, acctCodes = [];
   function authInit() {
+    if (SANDBOX) return Promise.reject(new Error('no accounts in the test sandbox'));
     if (!authReady) {
       authReady = (async () => {
         const v = '10.14.1';
@@ -2995,7 +3003,7 @@
   let acctBusy = null;
   // merge this device's profiles with the account's: every device signed in sees every child's game
   function accountSync(wait) {
-    if (!user) return Promise.resolve();
+    if (!user || SANDBOX) return Promise.resolve();
     if (acctBusy) return wait ? acctBusy.then(() => accountSync()) : acctBusy;
     acctBusy = (async () => {
       const H = { Authorization: 'Bearer ' + await user.getIdToken(), 'Content-Type': 'application/json' };
@@ -3117,7 +3125,7 @@
   // ---------- main loop ----------
   let lastT = performance.now(), uiT = 0, saveT = 0, bgT = 0;
   function tick(now) {
-    const dt = Math.min(0.1, Math.max(0, (now - lastT) / 1000));
+    const dt = Math.min(0.1, Math.max(0, (now - lastT) / 1000)) * FORCE.speed;
     lastT = now;
     G.lanes.forEach((L, k) => {
       if (!L.u || !RT[k].el) return;
@@ -3178,6 +3186,25 @@
   fillNames();
   moveHome();
 
+  if (SANDBOX) {
+    document.documentElement.classList.add('sandbox');
+    window.__admin = {
+      get S() { return S; }, WD, WONDERS, RIDES, FOOD, ACH, QUESTS, PEOPLE, NAMES, FORCE, fmt, MAXLVL, MAX_ANIMALS,
+      fresh, parseSave, cloudFetch, validCode, cleanCode, starCount,
+      replace(d) { S = parseSave(d); S.cur = S.worlds[S.cur] && S.worlds[S.cur].u ? S.cur : 0; this.refresh(); },
+      refresh(where) {
+        unlockWorlds(); autoPlaceLegacy();
+        if (!S.worlds[S.cur].u) S.cur = 0;
+        bindWorld(); resetRT(); applyTheme();
+        if (openK >= 0) closeLane(true);
+        view = where || (view === 'district' ? 'district' : 'city');
+        renderNav(); renderCurrent(); shownCoins = -1; shownStars = -1; refreshUI(); renderQuest(); save();
+      },
+      goWorld, setView, openLane, showWonder, spawnRescue: () => spawnRescue(), spawnVisitor: () => spawnVisitor(),
+      startStory, celebrate, confetti, save, applyOffline, dayNight, weatherTick: () => weatherTick(), openGrownups,
+    };
+    const sc = document.createElement('script'); sc.src = 'admin.js'; document.body.appendChild(sc);
+  }
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
   }

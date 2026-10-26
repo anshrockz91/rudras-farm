@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Farm Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #1f2233; --card: #2b2f45; --ink: #f4f5fb; --muted: #a9adc6; --acc: #ffc83d; --bad: #ff6b6b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: radial-gradient(circle at 30% 20%, #34395a, var(--bg) 70%); color: var(--ink); font-family: Fredoka, system-ui, sans-serif; }
+  .box { width: 100%; max-width: 380px; background: var(--card); border-radius: 24px; padding: 28px 22px; text-align: center; box-shadow: 0 20px 50px rgba(0, 0, 0, .35); }
+  .ico { font-size: 54px; }
+  h1 { margin: 6px 0 4px; font-size: 26px; }
+  p { margin: 0 0 18px; color: var(--muted); font-size: 15px; line-height: 1.4; }
+  input[type=password] { width: 100%; font: inherit; font-size: 24px; letter-spacing: 4px; text-align: center; padding: 12px; border-radius: 14px; border: 2px solid #464b6b; background: #1b1e2e; color: var(--ink); }
+  input[type=password]:focus { outline: none; border-color: var(--acc); }
+  label { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 14px 0; color: var(--muted); font-size: 15px; }
+  button { width: 100%; font: inherit; font-size: 20px; font-weight: 700; padding: 12px; border: 0; border-radius: 14px; background: var(--acc); color: #3a2a00; cursor: pointer; }
+  button:disabled { opacity: .6; }
+  .msg { min-height: 22px; margin-top: 12px; font-size: 15px; color: var(--bad); }
+</style>
+</head>
+<body>
+<form class="box" id="f" autocomplete="off">
+  <div class="ico">🛠️</div>
+  <h1>Farm Admin</h1>
+  <p>Test sandbox with full access. Nothing you do here changes anyone's real game.</p>
+  <input type="password" id="code" placeholder="Admin code" autofocus>
+  <label><input type="checkbox" id="remember"> Remember this device</label>
+  <button id="go">Enter</button>
+  <div class="msg" id="msg"></div>
+</form>
+<script src="admin-key.js"></script>
+<script>
+  // the code is checked against a salted PBKDF2 hash; the matching key opens the sandbox for this browser
+  async function derive(code) {
+    const K = window.ADMIN_KEY, enc = new TextEncoder();
+    const base = await crypto.subtle.importKey('raw', enc.encode(code), 'PBKDF2', false, ['deriveBits']);
+    const salt = new Uint8Array(K.salt.match(/../g).map(h => parseInt(h, 16)));
+    const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: K.iter }, base, 256);
+    return [...new Uint8Array(bits)].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  const open = () => location.replace('index.html?sandbox=1');
+  try { if ([sessionStorage, localStorage].some(st => st.getItem('rf.admin') === window.ADMIN_KEY.hash)) open(); } catch (e) { /* storage blocked */ }
+  let fails = 0;
+  document.getElementById('f').addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = document.getElementById('go'), msg = document.getElementById('msg');
+    btn.disabled = true; msg.textContent = '';
+    const h = await derive(document.getElementById('code').value.trim().toUpperCase());
+    if (h === window.ADMIN_KEY.hash) {
+      try { sessionStorage.setItem('rf.admin', h); if (document.getElementById('remember').checked) localStorage.setItem('rf.admin', h); } catch (err) { /* storage blocked */ }
+      open(); return;
+    }
+    fails++;
+    msg.textContent = 'Wrong code';
+    setTimeout(() => { btn.disabled = false; }, Math.min(30000, 1000 * 2 ** fails)); // slows down guessing
+  });
+</script>
+</body>
+</html>
