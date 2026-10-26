@@ -65,6 +65,14 @@ service cloud.firestore {
         && request.resource.data.t is int;
       allow get, update, delete: if false;
     }
+    // a voice call's "ring" between two friends (the sound itself never comes here)
+    match /calls/{r} {
+      allow get: if room(r);
+      allow create, update: if room(r) && request.resource.data.keys().hasOnly(['from', 'to', 'st', 'offer', 'answer', 't'])
+        && request.resource.data.st in ['ring', 'answer', 'end', 'no'] && request.resource.data.t is int
+        && request.resource.data.get('offer', '').size() < 20000 && request.resource.data.get('answer', '').size() < 20000;
+      allow list, delete: if false;
+    }
     // team quest progress shared by two friends
     match /teams/{r} {
       allow get: if room(r);

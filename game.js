@@ -126,7 +126,7 @@
   const storyDefaults = () => ({ q: 0, done: {}, intro: false, finale: false });
   const cityDefaults = () => ({ cars: {}, ride: '', food: {}, visitors: {}, rescues: 0, hi: {} });
   const mapDefaults = () => ({ places: {}, slots: {}, wslots: {} });
-  const socialDefaults = () => ({ fid: '', friends: [], gifted: {}, team: {}, seen: {}, trophies: 0 });
+  const socialDefaults = () => ({ fid: '', friends: [], gifted: {}, team: {}, seen: {}, trophies: 0, calls: {} });
   const playDefaults = () => ({ used: 0, day: '', dayUsed: 0, extra: 0, warned: false, lock: null });
   function freshWorld(w) {
     return {
@@ -2527,17 +2527,19 @@
     if (!(away > 30)) return;
     const lines = [];
     let longest = 0;
+    // helpers only work a little while you're away (fair play: coming back daily isn't a shortcut)
+    // up to 1 hour at a quarter speed; the area's 3rd building (Farmhouse etc.) makes it 2 hours at 40%
     S.worlds.forEach((g, w) => {
       if (!g.u) return;
-      const secs = Math.min(away, g.b[2] ? 8 * 3600 : 2 * 3600);
+      const secs = Math.min(away, g.b[2] ? 2 * 3600 : 3600);
       longest = Math.max(longest, secs);
-      const c = simWorld(w, secs, (g.b[2] ? 1 : 0.5) * (S.wonders.train ? 2 : 1));
+      const c = simWorld(w, secs, g.b[2] ? 0.4 : 0.25);
       if (c >= 1) lines.push(`<div class="oc">${WD[w].icon} +${fmt(c)} 💰</div>`);
     });
     if (!lines.length) return;
     save();
     const hrs = Math.floor(longest / 3600), mins = Math.floor((longest % 3600) / 60);
-    openModal(`<div class="offline"><div class="oe">😴🌙</div><div class="ot">⏰ ${hrs ? hrs + 'h ' : ''}${mins}m</div>
+    openModal(`<div class="offline"><div class="oe">😴🌙</div><div class="ot">Your helpers worked for ${hrs ? hrs + 'h ' : ''}${mins}m while you were away</div>
       ${lines.join('')}<button class="bigbtn" id="okOff">👍</button></div>`);
     $('#okOff').onclick = () => { ac(); sfx.coin(); flyCoins($('#okOff'), 6); closeModal(); };
   }
@@ -3219,6 +3221,10 @@
         const rid = roomId(f.fid), last = (await fsList(`rooms/${rid}/m`, 1, 't desc'))[0];
         unread[f.fid] = !!(last && last.f !== me && last.t > (SOC().seen[rid] || 0));
         await teamStep(f);
+        if (!SOC().calls[f.fid]) { // calls never set up here: tell a caller politely instead of leaving them ringing
+          const d = await fsGet('calls/' + rid);
+          if (d && d.st === 'ring' && d.to === me && Date.now() - d.t < RING_FOR) await fsSet('calls/' + rid, { st: 'no', t: Date.now() }, true);
+        }
       }
       giftsIn.length = 0;
       (await fsList(`players/${me}/gifts`, 20)).forEach(g => { if (SOC().friends.some(f => f.ok && f.fid === g.f)) giftsIn.push(g); });
@@ -3336,6 +3342,7 @@
     const giftToday = SOC().gifted[fid] === today8();
     openModal(`<div class="friend"><div class="fhead"><span class="fav">${esc(f.av || '🧒')}</span><h2>${esc(f.n)}</h2></div>
       ${f.ok ? `<div class="setrow"><button class="smallbtn" id="fVisit">🏙️ Visit town</button><button class="smallbtn" id="fGift"${giftToday ? ' disabled' : ''}>${giftToday ? '✅ Gift sent today' : '🎁 Send a gift'}</button></div>
+        ${callRowHTML(f)}
         <div id="teamBox">${teamHTML(f)}</div>
         <div class="chat" id="chatBox"><div class="phint">💬 …</div></div>
         <div class="phrases">${PHRASES.map((t, i) => `<button class="phr" data-p="${i}">${t}</button>`).join('')}</div>`
@@ -3348,6 +3355,7 @@
       toast('Friend removed'); openFriends();
     });
     if (!f.ok) return;
+    bindCallRow(f);
     $('#fVisit').onclick = () => visitFriend(f);
     $('#fGift').onclick = e => sendGift(f, e.currentTarget);
     const claim = $('#tqClaim');
@@ -3435,6 +3443,168 @@
   }
   // keep the friend card fresh and check on friends when the game opens
   setTimeout(() => { if (SOC().fid) socialTick(); }, 4000);
+
+
+  // ---------- voice calls between two friends ----------
+  // Sound goes straight between the two devices (WebRTC); Firestore only carries the "ring". Nothing is recorded.
+  // A grown-up switches calls on per friend (PIN) and picks the hours; both families must switch it on.
+  const ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
+  const CALL_MAX = 30 * 60 * 1000, RING_FOR = 40000;
+  let call = null; // { f, rid, pc, stream, audio, role, st, t0, timer }
+  const callSet = fid => SOC().calls[fid] || { on: false, from: 8, to: 19 };
+  const inHours = c => { const h = new Date().getHours(); return h >= c.from && h < c.to; };
+  const canCall = fid => { const c = callSet(fid); return c.on && inHours(c) && !S.play.lock; };
+  const hh = h => `${((h + 11) % 12) + 1}${h < 12 ? 'am' : 'pm'}`;
+  function callRowHTML(f) {
+    if (!('RTCPeerConnection' in window) || !navigator.mediaDevices) return '';
+    const c = callSet(f.fid);
+    if (!c.on) return `<div class="callrow off"><span>📞 Calls are off</span><button class="linkbtn" id="callSet">Grown-ups: turn on</button></div>`;
+    return `<div class="callrow"><button class="bigbtn${inHours(c) ? ' can' : ''}" id="callGo">📞 Call ${esc(f.n)}</button>
+      <small>Calls allowed ${hh(c.from)}–${hh(c.to)} · <button class="linkbtn" id="callSet">change</button></small></div>`;
+  }
+  function bindCallRow(f) {
+    const set = $('#callSet');
+    if (set) set.onclick = () => parentGate(() => callSettings(f));
+    const go = $('#callGo');
+    if (go) go.onclick = () => startCall(f);
+  }
+  function callSettings(f) {
+    const c = Object.assign({ on: false, from: 8, to: 19 }, callSet(f.fid));
+    const opt = (sel) => [...Array(24)].map((_, h) => `<option value="${h}"${h === sel ? ' selected' : ''}>${hh(h)}</option>`).join('');
+    openModal(`<h2>📞 Calls with ${esc(f.n)}</h2>
+      <p class="phint">Voice calls go straight between the two devices and are never recorded. ${esc(f.n)}'s grown-up has to switch calls on too.
+      Calls end after 30 minutes and when play time runs out.</p>
+      <div class="setrow"><label>From <select id="cFrom">${opt(c.from)}</select></label><label>to <select id="cTo">${opt(c.to)}</select></label></div>
+      <div class="setrow"><button class="bigbtn can" id="cOn">✅ Allow calls</button><button class="bigbtn" id="cOff">🚫 No calls</button></div>`);
+    const saveIt = on => {
+      const from = +$('#cFrom').value, to = +$('#cTo').value;
+      SOC().calls[f.fid] = { on, from: Math.min(from, to), to: Math.max(from + 1, to) }; S.pend = true; save();
+      toast(on ? `📞 Calls with ${f.n} allowed ${hh(SOC().calls[f.fid].from)}–${hh(SOC().calls[f.fid].to)}` : '📞 Calls switched off');
+      openFriend(f.fid);
+    };
+    $('#cOn').onclick = () => saveIt(true);
+    $('#cOff').onclick = () => saveIt(false);
+  }
+  // wait for the connection details to be ready so they go in one message (no extra back-and-forth)
+  const iceDone = pc => new Promise(res => {
+    if (pc.iceGatheringState === 'complete') return res();
+    const t = setTimeout(res, 3000);
+    pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') { clearTimeout(t); res(); } });
+  });
+  async function newPeer(f, role) {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    const pc = new RTCPeerConnection({ iceServers: ICE });
+    stream.getTracks().forEach(tr => pc.addTrack(tr, stream));
+    const audio = new Audio(); audio.autoplay = true; audio.play().catch(() => {}); // started inside the tap so it may play later
+    pc.ontrack = e => { audio.srcObject = e.streams[0]; audio.play().catch(() => {}); };
+    pc.onconnectionstatechange = () => {
+      if (!call || call.pc !== pc) return;
+      if (pc.connectionState === 'connected' && call.st !== 'live') { call.st = 'live'; call.t0 = Date.now(); stopRing(); sfx.yippee(); callBar(); }
+      if (pc.connectionState === 'failed') endCall('Couldn’t connect 😕 Try again on home Wi-Fi.');
+    };
+    call = { f, rid: roomId(f.fid), pc, stream, audio, role, st: role === 'caller' ? 'calling' : 'joining', t0: 0 };
+    return call;
+  }
+  async function startCall(f) {
+    if (call) return toast('You’re already on a call');
+    if (!canCall(f.fid)) return toast(callSet(f.fid).on ? `Calls with ${f.n} are allowed ${hh(callSet(f.fid).from)}–${hh(callSet(f.fid).to)}` : 'A grown-up needs to turn calls on first');
+    try {
+      closeModal();
+      const c = await newPeer(f, 'caller');
+      callBar();
+      await c.pc.setLocalDescription(await c.pc.createOffer());
+      await iceDone(c.pc);
+      if (call !== c) return;
+      await fsSet('calls/' + c.rid, { from: myFid(), to: f.fid, st: 'ring', offer: c.pc.localDescription.sdp, answer: '', t: Date.now() });
+      c.ringT = Date.now();
+      ringTone(true);
+      c.timer = setInterval(() => callPoll(c), 1500);
+    } catch (e) { endCall(e && e.name === 'NotAllowedError' ? 'The microphone is blocked. Allow it in the browser settings.' : 'Couldn’t start the call.'); }
+  }
+  async function callPoll(c) {
+    if (call !== c) return clearInterval(c.timer);
+    let d; try { d = await fsGet('calls/' + c.rid); } catch (e) { return; }
+    if (!d || call !== c) return;
+    if (d.st === 'end' && d.t > (c.ringT || 0) - 1000) return endCall(c.st === 'live' ? '📞 Call ended' : `${c.f.n} said not now`, true);
+    if (d.st === 'no') return endCall(`Calls with ${c.f.n} aren’t switched on by their grown-up yet`, true);
+    if (c.role === 'caller' && c.st === 'calling') {
+      if (d.st === 'answer' && d.answer) { c.st = 'joining'; callBar(); await c.pc.setRemoteDescription({ type: 'answer', sdp: d.answer }); }
+      else if (Date.now() - c.ringT > RING_FOR) endCall(`${c.f.n} didn’t answer`);
+    }
+    if (c.st === 'live' && (Date.now() - c.t0 > CALL_MAX || S.play.lock)) endCall(S.play.lock ? 'Play time is over, call ended' : 'Calls end after 30 minutes 👋');
+    if (c.st === 'live') callBar();
+  }
+  // someone is calling me? (checked every few seconds, only for friends a grown-up allowed)
+  let ringing = null, lastRingSeen = {};
+  async function checkRings() {
+    if (!socialOK() || !SOC().fid || document.hidden || call || ringing) return;
+    for (const f of mutual()) {
+      if (!SOC().calls[f.fid]) continue; // calls never set up with this friend
+      let d; try { d = await fsGet('calls/' + roomId(f.fid)); } catch (e) { return; }
+      if (!d || d.st !== 'ring' || d.to !== SOC().fid || Date.now() - d.t > RING_FOR || lastRingSeen[f.fid] === d.t) continue;
+      lastRingSeen[f.fid] = d.t;
+      if (!canCall(f.fid)) { fsSet('calls/' + roomId(f.fid), { st: 'no', t: Date.now() }, true).catch(() => {}); continue; }
+      return showRing(f, d);
+    }
+  }
+  setInterval(checkRings, 4000);
+  function showRing(f, d) {
+    ringing = f;
+    const box = el('div', 'ringbox', `<span class="rav">${esc(f.av || '🧒')}</span><b>📞 ${esc(f.n)} is calling!</b>
+      <div class="setrow"><button class="bigbtn can" id="rYes">Answer</button><button class="bigbtn" id="rNo">Not now</button></div>`);
+    document.body.appendChild(box);
+    ringTone(true);
+    const close = () => { box.remove(); ringing = null; stopRing(); clearTimeout(gone); };
+    const gone = setTimeout(close, Math.max(1000, RING_FOR - (Date.now() - d.t)));
+    box.querySelector('#rNo').onclick = () => { close(); fsSet('calls/' + roomId(f.fid), { st: 'end', t: Date.now() }, true).catch(() => {}); };
+    box.querySelector('#rYes').onclick = async () => {
+      close();
+      try {
+        const c = await newPeer(f, 'callee');
+        c.ringT = d.t; callBar();
+        await c.pc.setRemoteDescription({ type: 'offer', sdp: d.offer });
+        await c.pc.setLocalDescription(await c.pc.createAnswer());
+        await iceDone(c.pc);
+        if (call !== c) return;
+        await fsSet('calls/' + c.rid, { st: 'answer', answer: c.pc.localDescription.sdp, t: Date.now() }, true);
+        c.timer = setInterval(() => callPoll(c), 1500);
+      } catch (e) { endCall(e && e.name === 'NotAllowedError' ? 'The microphone is blocked. Allow it in the browser settings.' : 'Couldn’t join the call.'); }
+    };
+  }
+  function endCall(msg, theyEnded) {
+    const c = call;
+    if (!c) return;
+    call = null; clearInterval(c.timer); stopRing();
+    try { c.pc.close(); } catch (e) { /* already closed */ }
+    c.stream.getTracks().forEach(tr => tr.stop());
+    c.audio.srcObject = null;
+    if (!theyEnded) fsSet('calls/' + c.rid, { st: 'end', t: Date.now() }, true).catch(() => {});
+    const b = $('#callbar'); if (b) b.remove();
+    if (msg) toast(msg);
+  }
+  function callBar() {
+    const c = call;
+    let b = $('#callbar');
+    if (!c) { if (b) b.remove(); return; }
+    if (!b) { b = el('div', 'callbar'); b.id = 'callbar'; document.body.appendChild(b); }
+    const secs = c.st === 'live' ? Math.floor((Date.now() - c.t0) / 1000) : 0;
+    const what = c.st === 'live' ? `🔊 On a call with ${esc(c.f.n)} · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`
+      : c.st === 'calling' ? `📞 Calling ${esc(c.f.n)}…` : `📞 Connecting to ${esc(c.f.n)}…`;
+    const muted = c.stream.getAudioTracks().some(t => !t.enabled);
+    b.innerHTML = `<span>${esc(c.f.av || '🧒')}</span><b>${what}</b>${c.st === 'live' ? `<button id="cbMute">${muted ? '🔇 Unmute' : '🎙️ Mute'}</button>` : ''}<button class="end" id="cbEnd">End call</button>`;
+    b.querySelector('#cbEnd').onclick = () => endCall('📞 Call ended');
+    const m = b.querySelector('#cbMute');
+    if (m) m.onclick = () => { c.stream.getAudioTracks().forEach(t => { t.enabled = !t.enabled; }); callBar(); };
+  }
+  let ringT = 0;
+  function ringTone(on) {
+    stopRing();
+    if (!on || S.mute) return;
+    const ring = () => { tone(880, 0.25, 'sine', 0.05); tone(660, 0.25, 'sine', 0.05, null, 0.3); };
+    ring(); ringT = setInterval(ring, 2000);
+  }
+  function stopRing() { clearInterval(ringT); ringT = 0; }
+  window.addEventListener('pagehide', () => { if (call) endCall(); });
 
   // ---------- main loop ----------
   let lastT = performance.now(), uiT = 0, saveT = 0, bgT = 0;
