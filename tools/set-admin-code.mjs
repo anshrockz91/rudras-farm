@@ -4,7 +4,7 @@ import { pbkdf2Sync, randomBytes } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 
 const code = String(process.argv[2] || '').trim().toUpperCase();
-if (code.length < 6) { console.error('Use a code of at least 6 letters/numbers.'); process.exit(1); }
+if (code.length < 4) { console.error('Use a code of at least 4 letters/numbers.'); process.exit(1); }
 const ITER = 310000;
 const salt = randomBytes(16).toString('hex');
 const hash = pbkdf2Sync(code, Buffer.from(salt, 'hex'), ITER, 32, 'sha256').toString('hex');
