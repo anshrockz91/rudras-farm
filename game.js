@@ -3,6 +3,12 @@
   // ---------- config ----------
   // admin test sandbox (opened from admin.html): separate saves, no cloud, no accounts
   const SANDBOX = !!window.RF_SANDBOX;
+  // names in the game follow the player: "Mia's Farm", "Planet Mia" (or "My Farm" before a name is set)
+  function playerName() {
+    try { const n = (curProfile() || {}).name || ''; return /^(…|Player|Tester)?$/.test(n) ? '' : n; } catch (e) { return ''; } // profiles load later
+  }
+  const own = what => { const n = playerName(); return n ? `${n}'s ${what}` : `My ${what}`; };
+  const planetName = () => { const n = playerName(); return n ? 'Planet ' + n : 'My Planet'; };
   const SAVE_KEY = SANDBOX ? 'rudrasFarm.sandbox.v1' : 'rudrasFarm.v1'; // same key as v1 so existing farm progress carries over
   const PEN_X = 0.34, COUNTER_X = 0.63, TRUCK_STOP = 0.80, TRUCK_OUT = 1.25;
   const PLAYER_SPEED = 0.75, PLAYER_CAP = 15, MAXLVL = 10, MAX_ANIMALS = 5;
@@ -19,7 +25,7 @@
   // lanes: [animal, product, card tint, pen ground, awning stripe, deco1, deco2]
   const WORLD_DEFS = [
     {
-      icon: '🚜', title: "Rudra's Farm", done: "Rudra's Farm Company", t1: '🌻',
+      icon: '🚜', get title() { return own('Farm'); }, get done() { return own('Farm Company'); }, t1: '🌻',
       bg: ['#8fd8ff', '#c9f1ff', '#bfe9a0', '#a7dd80'], fence: ['#b9773b', '#8a5426'], work: ['🧑‍🌾', '🧑‍💼', '🚚'],
       lanes: [
         ['🐔', '🥚', '#fff1bf', '#ecd39b', '#ff5a5a', '🌾', '🌼'],
@@ -32,7 +38,7 @@
       build: [['🛖', 'Coop'], ['🏡', 'Barn'], ['🏠', 'Farmhouse'], ['🏪', 'Shop'], ['🏭', 'Factory'], ['🏢', 'Company']],
     },
     {
-      icon: '🐶', title: "Rudra's Puppy Town", done: "Rudra's Pet Palace", t1: '🐾',
+      icon: '🐶', get title() { return own('Puppy Town'); }, get done() { return own('Pet Palace'); }, t1: '🐾',
       bg: ['#ffc9e6', '#ffeef7', '#c8f0b0', '#a9e38c'], fence: ['#ffffff', '#c7b3c7'], work: ['🧑‍⚕️', '🧑‍💼', '🚐'],
       lanes: [
         ['🐕', '🐶', '#ffe7d1', '#f6dcb8', '#ff8a3d', '🦴', '🎾'],
@@ -45,7 +51,7 @@
       build: [['⛺', 'Kennel'], ['🏥', 'Vet'], ['🏨', 'Pet Hotel'], ['🧸', 'Toy Shop'], ['🏬', 'Pet Mall'], ['🏰', 'Pet Palace']],
     },
     {
-      icon: '🦁', title: "Rudra's Safari Zoo", done: "Rudra's Mega Zoo", t1: '🌴',
+      icon: '🦁', get title() { return own('Safari Zoo'); }, get done() { return own('Mega Zoo'); }, t1: '🌴',
       bg: ['#ffd77a', '#fff3cf', '#e6d58a', '#d4c06a'], fence: ['#7a9a3a', '#4f6b1f'], work: ['🤠', '🧑‍💼', '🚌'],
       lanes: [
         ['🐊', '🎈', '#dcf5ff', '#7cc8e8', '#00a3d9', '🌿', '🐸'],
@@ -58,7 +64,7 @@
       build: [['🎪', 'Big Tent'], ['🎡', 'Big Wheel'], ['🎢', 'Coaster'], ['🛍️', 'Gift Shop'], ['🏨', 'Zoo Hotel'], ['🏟️', 'Mega Zoo']],
     },
     {
-      icon: '🏗️', title: "Rudra's Builder Town", done: "Rudra's Rocket", t1: '🔨', still: true,
+      icon: '🏗️', get title() { return own('Builder Town'); }, get done() { return own('Rocket'); }, t1: '🔨', still: true,
       bg: ['#9fd3ff', '#e6f4ff', '#e8d3a8', '#d9bd86'], fence: ['#f5a623', '#b8730a'], work: ['👷', '🧑‍💼', '🚛'],
       lanes: [
         ['🌲', '🪵', '#e3f3d8', '#9ccf7a', '#2e9e4f', '🌲', '🍄'],
@@ -71,7 +77,7 @@
       build: [['🛠️', 'Workshop'], ['🏗️', 'Crane'], ['🏘️', 'Houses'], ['🌉', 'Bridge'], ['🏙️', 'City'], ['🚀', 'Rocket']],
     },
     {
-      icon: '🌙', title: "Rudra's Space Farm", done: 'Planet Rudra', t1: '✨', wonder: 'space',
+      icon: '🌙', get title() { return own('Space Farm'); }, get done() { return planetName(); }, t1: '✨', wonder: 'space',
       bg: ['#1d2257', '#3b3f8f', '#8f7fc4', '#6f5fa8'], fence: ['#c9d1e0', '#7d8aa3'], work: ['👨‍🚀', '👩‍🚀', '🛸'],
       lanes: [
         ['🌙', '🧀', '#eef0ff', '#d9d4ef', '#5b5fd6', '⭐', '🌟'],
@@ -81,7 +87,7 @@
         ['🦖', '🦴', '#e9f7df', '#bfdc9e', '#16a34a', '🌋', '🌿'],
         ['🐉', '🪙', '#fff1d6', '#f0cf91', '#f59e0b', '🔥', '💎'],
       ],
-      build: [['🏕️', 'Moon Camp'], ['🔭', 'Telescope'], ['🧪', 'Space Lab'], ['📡', 'Big Dish'], ['🌌', 'Galaxy Mall'], ['🪐', 'Planet Rudra']],
+      build: [['🏕️', 'Moon Camp'], ['🔭', 'Telescope'], ['🧪', 'Space Lab'], ['📡', 'Big Dish'], ['🌌', 'Galaxy Mall'], ['🪐', 'Planet']],
     },
   ];
   // delivery vehicle per upgrade tier (levels 1-3, 4-6, 7-9, 10), per world
@@ -107,9 +113,9 @@
   const WONDERS = [
     { id: 'train', e: '🚂', n: 'Train Station', fx: '📦 x2', need: [[0, 5], [1, 1]], cost: [[0, 5e7], [1, 2e5]] },
     { id: 'fair', e: '🎠', n: 'Fun Fair', fx: '💰 x2', need: [[1, 5], [2, 'u']], cost: [[0, 1e9], [1, 5e7]] },
-    { id: 'castle', e: '🏯', n: "Rudra's Castle", fx: '💰 x3', need: [[0, 5], [1, 5], [2, 2]], cost: [[0, 5e9], [1, 5e8], [2, 1e7]] },
+    { id: 'castle', e: '🏯', get n() { return own('Castle'); }, fx: '💰 x3', need: [[0, 5], [1, 5], [2, 2]], cost: [[0, 5e9], [1, 5e8], [2, 1e7]] },
     { id: 'space', e: '🛰️', n: 'Space Center', fx: '🌙 ✨', need: [[2, 5], [3, 5]], cost: [[0, 1e11], [1, 1e10], [2, 1e9], [3, 1e8]] },
-    { id: 'statue', e: '🗽', n: 'Golden Rudra', fx: '💰 x5', need: [[4, 5]], cost: [[0, 1e12], [1, 1e11], [2, 1e10], [3, 1e9], [4, 1e8]] },
+    { id: 'statue', e: '🗽', get n() { const n = playerName(); return n ? 'Golden ' + n : 'Golden Hero'; }, fx: '💰 x5', need: [[4, 5]], cost: [[0, 1e12], [1, 1e11], [2, 1e10], [3, 1e9], [4, 1e8]] },
   ];
 
   // ---------- state ----------
@@ -627,7 +633,7 @@
     const cap = penCap(L);
     if (L.g < cap) L.g = Math.min(cap, L.g + L.n * dt / prodTime(k));
 
-    // the player (Rudra)
+    // the player
     const P = R.player; P.moving = false;
     if (P.goal) {
       const atPen = P.goal === 'pen';
@@ -2830,7 +2836,7 @@
     $('#shareBtn').addEventListener('click', async e => {
       const btn = e.currentTarget;
       try {
-        if (navigator.share) await navigator.share({ title: "Rudra's Farm", text: `${p.name}'s game: ${prettyCode(p.code)}`, url: link });
+        if (navigator.share) await navigator.share({ title: 'Snoozeville', text: `${p.name}'s game: ${prettyCode(p.code)}`, url: link });
         else { await navigator.clipboard.writeText(link); btn.textContent = '✅ Copied'; }
       } catch (err) { /* share sheet closed */ }
     });

@@ -37,7 +37,7 @@
     hoot: { name: 'Doctor Hoot', e: '🦉', job: '🦉', voice: V.daniel, hero: true },
     nova: { name: 'Captain Nova', e: '👩', job: '👩‍🚀', voice: V.alice },
     bolt: { name: 'Bolt', e: '🤖', job: '🤖', voice: V.river },
-    super: { name: 'Super Rudra', e: '🦸', job: '🦸', voice: V.charlie, hero: true },
+    super: { name: 'Super Star', e: '🦸', job: '🦸', voice: V.charlie, hero: true },
   };
   const INTRO = { id: 'intro', who: 'max', text: 'Hello there! Welcome to Snoozeville. Yawn... Everyone here is sleepy, the shops are closed, and nobody is having fun. Will you help me wake up our town?' };
   const CHAPTERS = [
@@ -142,7 +142,7 @@
       ask: 'Can you believe it? Unicorns live in space! Let’s bring some!',
       thanks: 'Rainbows everywhere! I’m opening a rainbow café!' },
     { id: 'q30', c: 4, who: 'super', g: ['wonder', 'statue'], r: [4, 100000000], shop: ['🦸', 'Hero HQ'],
-      ask: 'I’m Super Rudra! You helped everyone in town. One last thing: build the golden statue!',
+      ask: 'I’m Super Star! You helped everyone in town. One last thing: build the golden statue!',
       thanks: 'You’re the real superhero! Hooray!' },
   ];
   // living-city lines: rescues, visitors, new places
