@@ -3208,28 +3208,47 @@
   const cards = {}; // friend fid -> their latest card
   const unread = {}, giftsIn = [];
   let teamDocs = {};
+  // tell a friend "something changed" (message, gift, team progress, a call) by stamping their mailbox
+  const ping = (fid, kind = 'p') => fsSet('box/' + fid, { [`${kind}_${myFid()}`]: Date.now() }, true).catch(() => {});
+  let box = null, boxT = 0;
+  async function readBox() { box = (await fsGet('box/' + SOC().fid)) || {}; boxT = Date.now(); return box; }
+  const handled = {}; // friend fid -> last ping we caught up on (this session)
+  let firstTick = true;
   async function socialTick() {
     if (!socialOK() || !SOC().fid || document.hidden) return;
     try {
       await pushCard();
-      const me = SOC().fid;
+      const me = SOC().fid, b = Date.now() - boxT < 6000 ? box : await readBox();
+      let giftsMaybe = firstTick;
       for (const f of SOC().friends) {
-        if (!f.ok) { if (await fsGet(`players/${f.fid}/fr/${me}`)) { f.ok = true; S.pend = true; save(); toast(`🎉 ${f.n} is now your friend!`); } }
-        const c = await fsGet('players/' + f.fid);
-        if (c) { cards[f.fid] = c; if (c.n && (c.n !== f.n || c.av !== f.av)) { f.n = c.n; f.av = c.av; } }
-        if (!f.ok) continue;
-        const rid = roomId(f.fid), last = (await fsList(`rooms/${rid}/m`, 1, 't desc'))[0];
-        unread[f.fid] = !!(last && last.f !== me && last.t > (SOC().seen[rid] || 0));
-        await teamStep(f);
-        if (!SOC().calls[f.fid]) { // calls never set up here: tell a caller politely instead of leaving them ringing
-          const d = await fsGet('calls/' + rid);
-          if (d && d.st === 'ring' && d.to === me && Date.now() - d.t < RING_FOR) await fsSet('calls/' + rid, { st: 'no', t: Date.now() }, true);
+        if (!f.ok) { // still waiting for them to add us back
+          if (await fsGet(`players/${f.fid}/fr/${me}`)) { f.ok = true; S.pend = true; save(); toast(`🎉 ${f.n} is now your friend!`); } else continue;
         }
+        const pinged = Math.max(b[`p_${f.fid}`] || 0, b[`r_${f.fid}`] || 0);
+        if (!firstTick && pinged <= (handled[f.fid] || 0)) { await teamStep(f, true); continue; } // nothing new: just send our own progress
+        handled[f.fid] = pinged; giftsMaybe = true;
+        await catchUp(f);
       }
-      giftsIn.length = 0;
-      (await fsList(`players/${me}/gifts`, 20)).forEach(g => { if (SOC().friends.some(f => f.ok && f.fid === g.f)) giftsIn.push(g); });
+      if (giftsMaybe) {
+        giftsIn.length = 0;
+        (await fsList(`players/${me}/gifts`, 20)).forEach(g => { if (SOC().friends.some(f => f.ok && f.fid === g.f)) giftsIn.push(g); });
+      }
+      firstTick = false;
       showFriendBadge();
     } catch (e) { /* offline: try again next time */ }
+  }
+  // a friend pinged us: fetch their card, newest message, team progress and any call
+  async function catchUp(f) {
+    const me = SOC().fid, rid = roomId(f.fid);
+    const c = await fsGet('players/' + f.fid);
+    if (c) { cards[f.fid] = c; if (c.n && (c.n !== f.n || c.av !== f.av)) { f.n = c.n; f.av = c.av; } }
+    const last = (await fsList(`rooms/${rid}/m`, 1, 't desc'))[0];
+    unread[f.fid] = !!(last && last.f !== me && last.t > (SOC().seen[rid] || 0));
+    await teamStep(f);
+    if (!(SOC().calls[f.fid] && SOC().calls[f.fid].on) && (box || {})[`r_${f.fid}`] > Date.now() - RING_FOR) { // calls never set up here: tell a caller politely
+      const d = await fsGet('calls/' + rid);
+      if (d && d.st === 'ring' && d.to === me && Date.now() - d.t < RING_FOR) await fsSet('calls/' + rid, { st: 'no', t: Date.now() }, true);
+    }
   }
   setInterval(socialTick, 25000);
   function showFriendBadge() {
@@ -3251,18 +3270,24 @@
       claimed: loc.claimed === q, both: !!(d[`k${q}_${me}`] && d[`k${q}_${f.fid}`]) };
   }
   const teamReady = f => { const t = teamState(f); return t.total >= t.T.need && !t.claimed; };
-  async function teamStep(f) {
+  async function teamStep(f, cached) {
     const rid = roomId(f.fid);
-    teamDocs[rid] = (await fsGet('teams/' + rid)) || { q: 0 };
+    if (!cached || !teamDocs[rid]) teamDocs[rid] = (await fsGet('teams/' + rid)) || { q: 0 };
     const t = teamState(f);
     if (t.both) return nextTeamQuest(t, f);
-    if (t.mine !== t.sent && !t.claimed) await fsSet('teams/' + rid, { q: t.q, [`c${t.q}_${SOC().fid}`]: t.mine }, true);
+    if (t.mine !== t.sent && !t.claimed) {
+      await fsSet('teams/' + rid, { q: t.q, [`c${t.q}_${SOC().fid}`]: t.mine }, true);
+      teamDocs[rid] = Object.assign({}, teamDocs[rid], { [`c${t.q}_${SOC().fid}`]: t.mine });
+      if (t.total >= t.T.need || Date.now() - (pingedTeam[rid] || 0) > 60000) { pingedTeam[rid] = Date.now(); ping(f.fid); }
+    }
   }
+  const pingedTeam = {};
   // both friends have collected: move on to the next quest and tidy the old numbers away
   async function nextTeamQuest(t, f) {
     const me = SOC().fid, old = [`c${t.q}_${me}`, `c${t.q}_${f.fid}`, `k${t.q}_${me}`, `k${t.q}_${f.fid}`];
     await fsSet('teams/' + t.rid, { q: t.q + 1 }, true, old);
     teamDocs[t.rid] = { q: t.q + 1 };
+    ping(f.fid);
   }
   async function claimTeam(f, btn) {
     const t = teamState(f);
@@ -3273,6 +3298,7 @@
     confetti(160); sfx.partyHorn(); celebrate('🏆', 0, `${t.T.n}! +${fmt(amt)} 💰`);
     try {
       await fsSet('teams/' + t.rid, { q: t.q, [`c${t.q}_${SOC().fid}`]: t.mine, [`k${t.q}_${SOC().fid}`]: 1 }, true);
+      ping(f.fid);
       await teamStep(f); // if the friend already collected, start the next quest
     } catch (e) { /* tried again on the next check */ }
     openFriend(f.fid);
@@ -3291,10 +3317,16 @@
   // ----- screens -----
   function parentGate(then) { if (S.parent.pin) { openModal(`<h2>👨‍👩‍👧 Grown-ups only</h2><div id="pinBox"></div>`); pinPad($('#pinBox'), 'PIN', checkPin(then)); } else setPinFlow(then); }
   function ago(t) { const m = (Date.now() - t) / 60000; return m < 3 ? '🟢 Playing now' : m < 60 ? `${Math.round(m)} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`; }
+  let cardsT = 0;
   function openFriends() {
     if (SANDBOX) return toast('Friends are switched off in the test sandbox');
     const me = myFid();
     pushCard(true).catch(() => {});
+    if (Date.now() - cardsT > 60000) { // who's online: read the cards now and then, not on every check
+      cardsT = Date.now();
+      Promise.all(SOC().friends.map(f => fsGet('players/' + f.fid).then(c => { if (c) cards[f.fid] = c; }).catch(() => {})))
+        .then(() => { if (!$('#modal').classList.contains('hidden') && $('#sheet .friends')) openFriends(); });
+    }
     const list = SOC().friends.map(f => {
       const c = cards[f.fid], badge = (unread[f.fid] ? '💬' : '') + (f.ok && teamReady(f) ? '🏆' : '');
       return `<button class="fcard" data-f="${f.fid}"><span class="fav">${esc(f.av || '🧒')}</span><span class="fn">${esc(f.n)}<small>${f.ok ? (c ? ago(c.t) : '') : '⏳ Waiting for them to add you too'}</small></span><i>${badge}</i></button>`;
@@ -3326,6 +3358,7 @@
         const c = await fsGet('players/' + code);
         if (!c) { msg.textContent = 'No player with that code yet. Ask them to open 👫 Friends once.'; return; }
         await fsSet(`players/${myFid()}/fr/${code}`, { t: Date.now() });
+        ping(code);
         const ok = !!(await fsGet(`players/${code}/fr/${myFid()}`));
         SOC().friends.push({ fid: code, n: c.n, av: c.av, ok, added: Date.now() }); cards[code] = c;
         S.pend = true; save();
@@ -3362,9 +3395,13 @@
     if (claim) claim.onclick = e => claimTeam(f, e.currentTarget);
     document.querySelectorAll('#sheet .phr').forEach(b => b.addEventListener('click', () => sendPhrase(f, +b.dataset.p, b)));
     const rid = roomId(fid);
+    let chatSeen = -1;
     const loadChat = async () => {
       if ($('#modal').classList.contains('hidden') || !$('#chatBox')) { clearInterval(chatT); return; }
       try {
+        const b = await readBox(), stamp = b[`p_${fid}`] || 0;
+        if (stamp === chatSeen) return; // nothing new from this friend
+        chatSeen = stamp; handled[fid] = stamp;
         const msgs = (await fsList(`rooms/${rid}/m`, 20, 't desc')).reverse();
         const box = $('#chatBox');
         box.innerHTML = msgs.map(m => `<div class="msg ${m.f === SOC().fid ? 'me' : 'them'}">${PHRASES[m.p] || ''}</div>`).join('') || '<div class="phint">Say hi! Tap a message below 👇</div>';
@@ -3375,7 +3412,7 @@
         if (tb && !$('#tqClaim')) { tb.innerHTML = teamHTML(f); const c2 = $('#tqClaim'); if (c2) c2.onclick = e => claimTeam(f, e.currentTarget); }
       } catch (e) { /* offline */ }
     };
-    loadChat(); chatT = setInterval(loadChat, 6000);
+    loadChat(); chatT = setInterval(loadChat, 5000);
     teamStep(f).catch(() => {});
   }
   let lastSend = 0;
@@ -3385,6 +3422,7 @@
     btn.classList.add('sent'); setTimeout(() => btn.classList.remove('sent'), 400); sfx.pop();
     try {
       await fsAdd(`rooms/${roomId(f.fid)}/m`, { f: myFid(), p, t: Date.now() });
+      ping(f.fid);
       const box = $('#chatBox');
       if (box) { box.insertAdjacentHTML('beforeend', `<div class="msg me">${PHRASES[p]}</div>`); box.scrollTop = box.scrollHeight; }
     } catch (e) { toast('Couldn’t send. Are you online?'); }
@@ -3393,7 +3431,7 @@
     if (SOC().gifted[f.fid] === today8()) return shake(btn);
     try {
       await fsSet(`players/${f.fid}/gifts/${myFid()}_${today8()}`, { f: myFid(), k: Math.floor(Math.random() * GIFTS.length), t: Date.now() });
-      SOC().gifted[f.fid] = today8(); S.pend = true; save();
+      SOC().gifted[f.fid] = today8(); S.pend = true; save(); ping(f.fid);
       sfx.yippee(); confetti(50); toast(`🎁 Gift sent to ${f.n}!`);
       btn.disabled = true; btn.textContent = '✅ Gift sent today';
     } catch (e) { toast('Couldn’t send. Are you online?'); }
@@ -3517,12 +3555,15 @@
       if (call !== c) return;
       await fsSet('calls/' + c.rid, { from: myFid(), to: f.fid, st: 'ring', offer: c.pc.localDescription.sdp, answer: '', t: Date.now() });
       c.ringT = Date.now();
+      ping(f.fid, 'r');
       ringTone(true);
       c.timer = setInterval(() => callPoll(c), 1500);
     } catch (e) { endCall(e && e.name === 'NotAllowedError' ? 'The microphone is blocked. Allow it in the browser settings.' : 'Couldn’t start the call.'); }
   }
   async function callPoll(c) {
     if (call !== c) return clearInterval(c.timer);
+    if (c.st === 'live') { callBar(); if (Date.now() - (c.polled || 0) < 6000) return; } // once talking, a slower check for "ended" is enough
+    c.polled = Date.now();
     let d; try { d = await fsGet('calls/' + c.rid); } catch (e) { return; }
     if (!d || call !== c) return;
     if (d.st === 'end' && d.t > (c.ringT || 0) - 1000) return endCall(c.st === 'live' ? '📞 Call ended' : `${c.f.n} said not now`, true);
@@ -3538,11 +3579,13 @@
   let ringing = null, lastRingSeen = {};
   async function checkRings() {
     if (!socialOK() || !SOC().fid || document.hidden || call || ringing) return;
+    if (!mutual().some(f => SOC().calls[f.fid] && SOC().calls[f.fid].on)) return; // no calls allowed: the slow check is enough
+    let b; try { b = await readBox(); } catch (e) { return; }
     for (const f of mutual()) {
-      if (!SOC().calls[f.fid]) continue; // calls never set up with this friend
+      if (!SOC().calls[f.fid] || !(b[`r_${f.fid}`] > Date.now() - RING_FOR) || lastRingSeen[f.fid] === b[`r_${f.fid}`]) continue;
       let d; try { d = await fsGet('calls/' + roomId(f.fid)); } catch (e) { return; }
       if (!d || d.st !== 'ring' || d.to !== SOC().fid || Date.now() - d.t > RING_FOR || lastRingSeen[f.fid] === d.t) continue;
-      lastRingSeen[f.fid] = d.t;
+      lastRingSeen[f.fid] = b[`r_${f.fid}`];
       if (!canCall(f.fid)) { fsSet('calls/' + roomId(f.fid), { st: 'no', t: Date.now() }, true).catch(() => {}); continue; }
       return showRing(f, d);
     }

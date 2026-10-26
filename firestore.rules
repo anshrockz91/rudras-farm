@@ -73,6 +73,12 @@ service cloud.firestore {
         && request.resource.data.get('offer', '').size() < 20000 && request.resource.data.get('answer', '').size() < 20000;
       allow list, delete: if false;
     }
+    // a player's mailbox: friends stamp "p_<their code>" (news) or "r_<their code>" (calling) with a time
+    match /box/{p} {
+      allow get: if fid(p);
+      allow create, update: if fid(p) && request.resource.data.keys().size() <= 60;
+      allow list, delete: if false;
+    }
     // team quest progress shared by two friends
     match /teams/{r} {
       allow get: if room(r);
